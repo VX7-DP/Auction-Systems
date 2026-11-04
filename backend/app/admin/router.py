@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.auth import require_admin
 from app.bidding import store
 from app.bidding.loader import load_into_redis
+from app.bidding.settings import get_bidding_settings
 from app.contract import AuctionCreate, AuctionSnapshot
 from app.resources import get_resources
 
@@ -20,7 +21,11 @@ async def create_auction(body: AuctionCreate) -> AuctionSnapshot:
     if body.end_at <= datetime.now(UTC):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "end_at must be in the future.")
     auction = await store.insert_auction(
-        get_resources().db_engine, body.title, body.start_price, body.end_at
+        get_resources().db_engine,
+        body.title,
+        body.start_price,
+        body.end_at,
+        get_bidding_settings().seq_block,
     )
     try:
         await load_into_redis(auction)

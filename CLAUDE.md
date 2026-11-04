@@ -58,6 +58,7 @@ A real-time auction system where many bidders race to update one auction's high 
 - **Insert fails after Redis accepted:** retry it, which is safe because the keys are the same. If it still fails, pause that auction (the script rejects bids while paused) and return an error. When writes work again, reload the auction from Postgres and unpause.
 - **Redis restart:** when an auction's key is missing, the script returns `NOT_LOADED`. The app reloads that auction from Postgres under a lock, then retries the bid.
 - **Every load is fenced (decided 4 Nov).** Loading an auction into Redis first bumps `auctions.load_epoch`, and the Redis hash carries that epoch. A bid write locks the auction row, then checks that the epoch it was decided under is still current before inserting, so a write decided against an older load can never commit after a reload. A write already past that check holds the row, so the reload waits for it. No timing assumption is involved.
+- **Seqs are reserved before Redis uses them (decided 4 Nov).** Redis shows a seq before Postgres records it: a pause, or a snapshot of a bid still being saved. So every load reserves a block of seqs in `auctions.seq_ceiling`, and Redis never hands out a seq above the ceiling it was given; it asks for the next block when it runs out. When Redis has lost an auction, the reload resumes at the old ceiling, above every seq Redis could have shown, so a seq is never reused. Viewers see one gap and resync.
 - **Why this option:** it's the only one that keeps both "no confirmed bid is lost" and "runs on any host" true.
 - **Upgrade path, not now:** Redis Streams plus a projector. It needs a self-hosted Redis that fsyncs every write, because ElastiCache doesn't support AOF.
 
@@ -68,7 +69,7 @@ A real-time auction system where many bidders race to update one auction's high 
 - **Idempotent bids:** the client sends a `bid_id` (UUID) with every bid. The Lua script remembers recent IDs per auction and returns the original result for a repeat.
 - **Auction close:** the Lua script rejects bids once Redis `TIME` reaches `end_at`, so there's one clock and no drift between instances. Closing is an idempotent script ("close if open and past `end_at`"), run by a sweeper on startup and every few seconds.
 - **Background jobs** (simulated bidders, close sweeper) run only on the instance holding that job's Redis lock (`SET NX PX`, renewed). Rolling deploys briefly run two instances; the lock prevents double bidders and double closes.
-- **Live update order:** `seq` goes up by one on every state change (an accepted bid, a pause or unpause, the close), and every event carries it. A client that sees a gap, or reconnects, fetches a snapshot over REST, because Redis Pub/Sub doesn't redeliver missed messages.
+- **Live update order:** `seq` goes up by one on every state change (an accepted bid, a pause or unpause, the close), and every event carries it. The one jump is after Redis loses an auction (see "Seqs are reserved" above). A client that sees a gap, or reconnects, fetches a snapshot over REST, because Redis Pub/Sub doesn't redeliver missed messages.
 
 ## 5. Build rules (host-agnostic)
 
@@ -170,12 +171,12 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 
 **Postgres:**
 
-- `auctions`: id, title, start_price, end_at, status (open, paused or closed), high_amount, high_bidder_id, high_bidder_name, high_seq, load_epoch (bumped on every load into Redis; see section 4).
+- `auctions`: id, title, start_price, end_at, status (open, paused or closed), high_amount, high_bidder_id, high_bidder_name, high_seq, load_epoch (bumped on every load into Redis; see section 4), seq_ceiling (the highest seq Redis may hand out; see section 4).
 - `bids`: bid_id (UUID, primary key), auction_id, seq, bidder_id, bidder_name, amount, is_bot, created_at. Unique on `(auction_id, seq)`.
 
 **Redis:**
 
-- Hash `auction:{id}` with `status`, `end_at_ms`, `start_price`, `high_amount`, `high_bidder_id`, `high_bidder_name`, `high_is_bot`, `seq` and `epoch` (the `load_epoch` it was loaded under).
+- Hash `auction:{id}` with `status`, `end_at_ms`, `start_price`, `high_amount`, `high_bidder_id`, `high_bidder_name`, `high_is_bot`, `seq`, `epoch` (the `load_epoch` it was loaded under) and `ceiling` (the highest seq it may hand out).
 - Hash encodings: every value is a string. `status` is `open`, `paused` or `closed`. Number fields are base-10 integers: amounts in minor units, and `end_at_ms` in milliseconds since the Unix epoch. `high_bidder_id` is a lowercase UUID, `high_bidder_name` is plain text, and `high_is_bot` is `1` or `0`. The `high_*` fields are absent until the first accepted bid.
 - Pub/Sub channel `auction:{id}:events`, carrying the WebSocket messages above as JSON.
 - Locks `lock:job:{name}`.

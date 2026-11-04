@@ -10,9 +10,11 @@ from contextlib import AbstractAsyncContextManager
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.contract import AuctionSnapshot, BidResult
+from app.bidding.settings import get_bidding_settings
+from app.contract import AuctionSnapshot, AuctionUpdate, BidResult
 from tests.bidding.helpers import (
     Bidder,
+    EventReader,
     HeldInsert,
     Stores,
     accepted,
@@ -44,11 +46,15 @@ async def test_redis_restart_keeps_every_confirmed_bid_and_the_high_bid(
     low = await bid(auction.id, chen, 180)
     assert low == rejected(low.bid_id, "too_low")
     restored = await stores.hash(auction.id)
+    # Seqs resume at the ceiling the first load reserved, above any seq the lost Redis
+    # could have shown, and the reload reserves the next block.
+    block = get_bidding_settings().seq_block
     assert restored == {
         "status": "open",
         "start_price": "100",
         "end_at_ms": str(to_ms(auction.end_at)),
-        "seq": "2",
+        "seq": str(block),
+        "ceiling": str(2 * block),
         "high_amount": "200",
         "high_bidder_id": str(ben.id),
         "high_bidder_name": "Ben",
@@ -60,15 +66,15 @@ async def test_redis_restart_keeps_every_confirmed_bid_and_the_high_bid(
     assert int(restored["epoch"]) == (await stores.auction(auction.id))["load_epoch"]
 
     third = await bid(auction.id, chen, 250)
-    assert third == accepted(third.bid_id, 3)
+    assert third == accepted(third.bid_id, block + 1)
     assert [
         (row["bid_id"], row["seq"], row["amount"]) for row in await stores.bids(auction.id)
     ] == [
         (first.bid_id, 1, 150),
         (second.bid_id, 2, 200),
-        (third.bid_id, 3, 250),
+        (third.bid_id, block + 1, 250),
     ]
-    await assert_high_bid(stores, auction.id, amount=250, bidder=chen, seq=3)
+    await assert_high_bid(stores, auction.id, amount=250, bidder=chen, seq=block + 1)
 
 
 async def test_bid_being_saved_during_a_redis_restart_is_kept(
@@ -97,7 +103,8 @@ async def test_bid_being_saved_during_a_redis_restart_is_kept(
     assert [
         (row["bid_id"], row["seq"], row["amount"]) for row in await stores.bids(auction.id)
     ] == [(asha_bid_id, 1, 500)]
-    await assert_high_bid(stores, auction.id, amount=500, bidder=asha, seq=1)
+    block = get_bidding_settings().seq_block
+    await assert_high_bid(stores, auction.id, amount=500, bidder=asha, seq=1, redis_seq=block)
 
 
 async def test_bid_decided_from_an_outdated_load_is_not_saved(
@@ -191,3 +198,37 @@ async def test_redis_restarts_during_a_bidding_burst_lose_no_confirmed_bid(
     assert final.status == "accepted" and final.seq is not None
     assert final.seq > saved[-1]["seq"]
     await assert_high_bid(stores, auction.id, amount=1000, bidder=finisher, seq=final.seq)
+
+
+async def test_seq_shown_by_a_pause_is_not_reused_after_a_redis_restart(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    stores: Stores,
+    restart_redis: Callable[[], Awaitable[None]],
+    hold_bid_insert: HoldBidInsert,
+    listen: Callable[[uuid.UUID], AbstractAsyncContextManager[EventReader]],
+) -> None:
+    """A save that Postgres won't take pauses the auction in Redis only, and viewers see
+    the pause's seq. Redis then restarts before the sweeper reloads the auction. The
+    next state change must still get a higher seq than the pause: a viewer drops an
+    event at or below the seq it already shows, so a reused seq is a lost update."""
+    auction = await create_auction(start_price=100)
+    asha_bid_id = uuid.uuid4()
+
+    async with listen(auction.id) as events:
+        async with hold_bid_insert(auction.id, asha_bid_id):  # every save attempt times out
+            failed = await bid(auction.id, new_bidder("Asha"), 150, bid_id=asha_bid_id)
+        assert failed.status == "error"
+        paused = await events.next()
+        assert isinstance(paused, AuctionUpdate) and paused.status == "paused"
+
+        await restart_redis()
+        ben = new_bidder("Ben")
+        next_bid = await bid(auction.id, ben, 120)
+
+        assert next_bid.status == "accepted" and next_bid.seq is not None
+        assert next_bid.seq > paused.seq, (
+            f"the bid after the restart reused seq {next_bid.seq}; viewers already saw"
+            f" seq {paused.seq} (the pause)"
+        )
+        assert all(event.seq > paused.seq for event in await events.drain())
+    assert [row["bid_id"] for row in await stores.bids(auction.id)] == [next_bid.bid_id]

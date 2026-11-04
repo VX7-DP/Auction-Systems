@@ -5,6 +5,11 @@ while holding the auction row FOR UPDATE. A bid write first locks the same row a
 checks the epoch its Redis decision was made under. So a write either finishes before
 a reload reads Postgres (the reload waits for its lock), or it sees the new epoch and
 is refused: a bid decided against an older load can never be saved after a reload.
+
+The seq ceiling: Redis shows seqs before Postgres records them (a pause, or a snapshot
+of a bid still being saved). So Redis may only hand out seqs up to auctions.seq_ceiling,
+which is reserved here first. When Redis loses an auction, it is reloaded at that
+ceiling, above every seq it could have shown, so no seq is ever reused.
 """
 
 import uuid
@@ -70,6 +75,10 @@ class StoredAuction:
     high_seq: int
     load_epoch: int
     bids: tuple[BidRecord, ...]
+    # Where seqs resume if Redis lost the auction: the ceiling before this load.
+    resume_seq: int
+    # The ceiling this load reserved.
+    seq_ceiling: int
 
     @property
     def high_is_bot(self) -> bool | None:
@@ -151,32 +160,34 @@ async def save_bid(
 
 
 async def read_for_load(
-    engine: AsyncEngine, auction_id: uuid.UUID, timeout_ms: int
+    engine: AsyncEngine, auction_id: uuid.UUID, timeout_ms: int, seq_block: int
 ) -> StoredAuction | None:
-    """Bumps load_epoch and reads the auction with all its bids, or returns None if
-    there is no such auction. Waits for bid writes that already passed the fence."""
+    """Bumps load_epoch, reserves the next block of seqs, and reads the auction with all
+    its bids, or returns None if there is no such auction. Waits for bid writes that
+    already passed the fence."""
     async with engine.begin() as connection:
         await _statement_timeout(connection, timeout_ms)
         row = (
             await connection.execute(
                 text(
                     "SELECT id, title, start_price, end_at, status, high_amount, high_bidder_id,"
-                    " high_bidder_name, high_seq FROM auctions WHERE id = :id FOR UPDATE"
+                    " high_bidder_name, high_seq, GREATEST(seq_ceiling, high_seq) AS resume_seq"
+                    " FROM auctions WHERE id = :id FOR UPDATE"
                 ),
                 {"id": auction_id},
             )
         ).one_or_none()
         if row is None:
             return None
-        epoch = (
+        epoch, ceiling = (
             await connection.execute(
                 text(
-                    "UPDATE auctions SET load_epoch = load_epoch + 1 WHERE id = :id"
-                    " RETURNING load_epoch"
+                    "UPDATE auctions SET load_epoch = load_epoch + 1, seq_ceiling = :ceiling"
+                    " WHERE id = :id RETURNING load_epoch, seq_ceiling"
                 ),
-                {"id": auction_id},
+                {"id": auction_id, "ceiling": row.resume_seq + seq_block},
             )
-        ).scalar_one()
+        ).one()
         bids = await connection.execute(
             text(
                 "SELECT bid_id, seq, amount, bidder_id, bidder_name, is_bot FROM bids"
@@ -187,6 +198,7 @@ async def read_for_load(
         return StoredAuction(
             **row._asdict(),
             load_epoch=epoch,
+            seq_ceiling=ceiling,
             bids=tuple(
                 BidRecord(b.bid_id, b.seq, b.amount, b.bidder_id, b.bidder_name, b.is_bot)
                 for b in bids
@@ -195,22 +207,46 @@ async def read_for_load(
 
 
 async def insert_auction(
-    engine: AsyncEngine, title: str, start_price: int, end_at: datetime
+    engine: AsyncEngine, title: str, start_price: int, end_at: datetime, seq_block: int
 ) -> StoredAuction:
-    """Creates an auction at load_epoch 1: the load into Redis that follows is its first."""
+    """Creates an auction at load_epoch 1, with its first block of seqs reserved: the
+    load into Redis that follows is its first."""
     async with engine.begin() as connection:
         row = (
             await connection.execute(
                 text(
-                    "INSERT INTO auctions (title, start_price, end_at, load_epoch)"
-                    " VALUES (:title, :start_price, :end_at, 1)"
+                    "INSERT INTO auctions (title, start_price, end_at, load_epoch, seq_ceiling)"
+                    " VALUES (:title, :start_price, :end_at, 1, :ceiling)"
                     " RETURNING id, title, start_price, end_at, status, high_amount,"
-                    " high_bidder_id, high_bidder_name, high_seq, load_epoch"
+                    " high_bidder_id, high_bidder_name, high_seq, load_epoch, seq_ceiling"
                 ),
-                {"title": title, "start_price": start_price, "end_at": end_at},
+                {
+                    "title": title,
+                    "start_price": start_price,
+                    "end_at": end_at,
+                    "ceiling": seq_block,
+                },
             )
         ).one()
-    return StoredAuction(**row._asdict(), bids=())
+    return StoredAuction(**row._asdict(), bids=(), resume_seq=0)
+
+
+async def raise_seq_ceiling(
+    engine: AsyncEngine, auction_id: uuid.UUID, epoch: int, seq: int, seq_block: int
+) -> int | None:
+    """Reserves the next block of seqs above ``seq``, Redis's current one. Returns the
+    new ceiling, or None if the auction has been reloaded since (its new load reserved
+    its own block)."""
+    async with engine.begin() as connection:
+        return (
+            await connection.execute(
+                text(
+                    "UPDATE auctions SET seq_ceiling = GREATEST(seq_ceiling, :seq) + :block"
+                    " WHERE id = :id AND load_epoch = :epoch RETURNING seq_ceiling"
+                ),
+                {"id": auction_id, "epoch": epoch, "seq": seq, "block": seq_block},
+            )
+        ).scalar_one_or_none()
 
 
 async def record_seq(engine: AsyncEngine, auction_id: uuid.UUID, epoch: int, seq: int) -> bool:

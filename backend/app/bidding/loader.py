@@ -36,6 +36,8 @@ async def load_into_redis(auction: store.StoredAuction) -> bool:
         "" if auction.high_bidder_id is None else str(auction.high_bidder_id),
         auction.high_bidder_name or "",
         "1" if auction.high_is_bot else "0",
+        str(auction.resume_seq),
+        str(auction.seq_ceiling),
     ]
     for bid in auction.bids:
         args += [str(bid.bid_id), bid.encode()]
@@ -59,7 +61,7 @@ async def reload_auction(auction_id: uuid.UUID) -> ReloadOutcome:
         return "busy"
     try:
         auction = await store.read_for_load(
-            resources.db_engine, auction_id, settings.reload_timeout_ms
+            resources.db_engine, auction_id, settings.reload_timeout_ms, settings.seq_block
         )
         if auction is None:
             return "not_found"
@@ -68,6 +70,19 @@ async def reload_auction(auction_id: uuid.UUID) -> ReloadOutcome:
         return "loaded"
     finally:
         await scripts.RELEASE_LOCK(resources.redis, [lock], [token])
+
+
+async def reserve_seqs(auction_id: uuid.UUID, epoch: int, seq: int) -> None:
+    """Redis is out of reserved seqs: reserve the next block in Postgres, then let Redis
+    use it. If the auction has been reloaded since, its new load has its own block."""
+    resources = get_resources()
+    ceiling = await store.raise_seq_ceiling(
+        resources.db_engine, auction_id, epoch, seq, get_bidding_settings().seq_block
+    )
+    if ceiling is not None:
+        await scripts.RAISE_CEILING(
+            resources.redis, [auction_key(auction_id)], [str(epoch), str(ceiling)]
+        )
 
 
 async def _announce_reopened(auction: store.StoredAuction) -> None:
