@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
-from redis.asyncio import Redis
+from redis.asyncio import BlockingConnectionPool, Redis
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -20,6 +20,12 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import NullPool
 
 from app.config import Settings
+
+# The shared Redis pool. A command that finds every connection busy waits up to
+# REDIS_POOL_TIMEOUT_SECONDS for one to come free. redis-py's default pool raises
+# MaxConnectionsError at once instead, which turns a write spike into failed bids.
+REDIS_MAX_CONNECTIONS = 100
+REDIS_POOL_TIMEOUT_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -43,7 +49,14 @@ async def open_resources(settings: Settings) -> AsyncIterator[Resources]:
     if _current is not None:
         raise RuntimeError("Resources are already open in this process.")
     db_engine = create_async_engine(settings.database_url)
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    redis = Redis.from_pool(  # the client owns the pool and closes it on aclose()
+        BlockingConnectionPool.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            max_connections=REDIS_MAX_CONNECTIONS,
+            timeout=REDIS_POOL_TIMEOUT_SECONDS,
+        )
+    )
     health_db_engine = create_async_engine(settings.database_url, poolclass=NullPool)
     _current = Resources(
         settings=settings,
