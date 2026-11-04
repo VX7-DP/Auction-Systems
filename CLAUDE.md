@@ -57,7 +57,7 @@ A real-time auction system where many bidders race to update one auction's high 
 - **Tradeoff:** Postgres latency is added to every bid response, and a Postgres outage stops bidding (it fails closed).
 - **Insert fails after Redis accepted:** retry it, which is safe because the keys are the same. If it still fails, pause that auction (the script rejects bids while paused) and return an error. When writes work again, reload the auction from Postgres and unpause.
 - **Redis restart:** when an auction's key is missing, the script returns `NOT_LOADED`. The app reloads that auction from Postgres under a lock, then retries the bid.
-- **Every reload** waits out the insert timeout before reading Postgres, so an insert still in flight is never missed.
+- **Every load is fenced (decided 4 Nov).** Loading an auction into Redis first bumps `auctions.load_epoch`, and the Redis hash carries that epoch. A bid write locks the auction row, then checks that the epoch it was decided under is still current before inserting, so a write decided against an older load can never commit after a reload. A write already past that check holds the row, so the reload waits for it. No timing assumption is involved.
 - **Why this option:** it's the only one that keeps both "no confirmed bid is lost" and "runs on any host" true.
 - **Upgrade path, not now:** Redis Streams plus a projector. It needs a self-hosted Redis that fsyncs every write, because ElastiCache doesn't support AOF.
 
@@ -163,12 +163,12 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 
 **Postgres:**
 
-- `auctions`: id, title, start_price, end_at, status (open, paused or closed), high_amount, high_bidder_id, high_bidder_name, high_seq.
+- `auctions`: id, title, start_price, end_at, status (open, paused or closed), high_amount, high_bidder_id, high_bidder_name, high_seq, load_epoch (bumped on every load into Redis; see section 4).
 - `bids`: bid_id (UUID, primary key), auction_id, seq, bidder_id, bidder_name, amount, is_bot, created_at. Unique on `(auction_id, seq)`.
 
 **Redis:**
 
-- Hash `auction:{id}` with `status`, `end_at_ms`, `start_price`, `high_amount`, `high_bidder_id`, `high_bidder_name`, `high_is_bot` and `seq`.
+- Hash `auction:{id}` with `status`, `end_at_ms`, `start_price`, `high_amount`, `high_bidder_id`, `high_bidder_name`, `high_is_bot`, `seq` and `epoch` (the `load_epoch` it was loaded under).
 - Pub/Sub channel `auction:{id}:events`, carrying the WebSocket messages above.
 - Locks `lock:job:{name}`.
 
@@ -198,6 +198,7 @@ Defaults are in effect unless the owner changes them.
 - Holding the durability fork open until a failing test forced it: decided 4 Nov as sync dual-write.
 - `xmin` optimistic concurrency on the bid path: now admin edits only.
 - "Postgres is never on the bid's latency path": it is now on the confirmation path.
+- A reload waiting out the insert timeout to catch in-flight inserts: replaced 4 Nov by the `load_epoch` fence (section 4).
 
 ## 13. Working preferences that still apply
 
