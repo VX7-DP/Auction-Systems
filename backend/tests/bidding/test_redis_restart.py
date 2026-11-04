@@ -10,6 +10,7 @@ from contextlib import AbstractAsyncContextManager
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.bidding.settings import get_bidding_settings
 from app.contract import AuctionSnapshot, AuctionUpdate, BidResult
 from tests.bidding.helpers import (
     Bidder,
@@ -45,11 +46,15 @@ async def test_redis_restart_keeps_every_confirmed_bid_and_the_high_bid(
     low = await bid(auction.id, chen, 180)
     assert low == rejected(low.bid_id, "too_low")
     restored = await stores.hash(auction.id)
+    # Seqs resume at the ceiling the first load reserved, above any seq the lost Redis
+    # could have shown, and the reload reserves the next block.
+    block = get_bidding_settings().seq_block
     assert restored == {
         "status": "open",
         "start_price": "100",
         "end_at_ms": str(to_ms(auction.end_at)),
-        "seq": "2",
+        "seq": str(block),
+        "ceiling": str(2 * block),
         "high_amount": "200",
         "high_bidder_id": str(ben.id),
         "high_bidder_name": "Ben",
@@ -61,15 +66,15 @@ async def test_redis_restart_keeps_every_confirmed_bid_and_the_high_bid(
     assert int(restored["epoch"]) == (await stores.auction(auction.id))["load_epoch"]
 
     third = await bid(auction.id, chen, 250)
-    assert third == accepted(third.bid_id, 3)
+    assert third == accepted(third.bid_id, block + 1)
     assert [
         (row["bid_id"], row["seq"], row["amount"]) for row in await stores.bids(auction.id)
     ] == [
         (first.bid_id, 1, 150),
         (second.bid_id, 2, 200),
-        (third.bid_id, 3, 250),
+        (third.bid_id, block + 1, 250),
     ]
-    await assert_high_bid(stores, auction.id, amount=250, bidder=chen, seq=3)
+    await assert_high_bid(stores, auction.id, amount=250, bidder=chen, seq=block + 1)
 
 
 async def test_bid_being_saved_during_a_redis_restart_is_kept(
@@ -98,7 +103,8 @@ async def test_bid_being_saved_during_a_redis_restart_is_kept(
     assert [
         (row["bid_id"], row["seq"], row["amount"]) for row in await stores.bids(auction.id)
     ] == [(asha_bid_id, 1, 500)]
-    await assert_high_bid(stores, auction.id, amount=500, bidder=asha, seq=1)
+    block = get_bidding_settings().seq_block
+    await assert_high_bid(stores, auction.id, amount=500, bidder=asha, seq=1, redis_seq=block)
 
 
 async def test_bid_decided_from_an_outdated_load_is_not_saved(
