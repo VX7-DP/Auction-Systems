@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.config import Settings
 from app.contract import auction_key, job_lock_key
 from app.demo.bots import BOTS, SimulatedBidders, ceiling_for
-from app.demo.job_lock import JobLock, run_while_holding
 from app.demo.lifespan import BOTS_JOB
+from app.job_lock import JobLock, run_while_holding
 from app.main import create_app
 from tests.realtime.conftest import FakeEngine, RecordingPlaceBid, in_hours, wait_until
 

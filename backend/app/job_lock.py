@@ -1,8 +1,14 @@
 """The Redis lock that keeps a background job on one instance (CLAUDE.md section 4).
 
+Shared by every background job: the close sweeper and the simulated bidders.
+
 ``SET lock:job:{name} <token> NX PX <ttl>``, renewed while held. Renew and release
 only touch the key if it still holds this instance's token. Rolling deploys briefly
 run two instances; the lock keeps the job on one of them.
+
+Two ways to use it: ``run_while_holding`` runs a long-lived job only while the lock is
+held (the bots), and ``hold()`` takes or renews it in one step for a job that checks
+before each pass (the close sweeper).
 
 The lock also tracks a local lease deadline: ``held()`` turns false once the TTL
 could have run out since the last renewal, even if this process stalled and never
@@ -24,6 +30,19 @@ logger = logging.getLogger(__name__)
 _RENEW = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then
     return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+"""
+
+_HOLD = """
+local holder = redis.call('GET', KEYS[1])
+if holder == ARGV[1] then
+    redis.call('PEXPIRE', KEYS[1], ARGV[2])
+    return 1
+end
+if not holder then
+    redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+    return 1
 end
 return 0
 """
@@ -57,6 +76,15 @@ class JobLock:
     async def renew(self) -> bool:
         started = time.monotonic()
         if await self.redis.eval(_RENEW, 1, self.key, self.token, self.ttl_ms):
+            self._valid_until = started + self.ttl_ms / 1000
+            return True
+        self._valid_until = 0.0
+        return False
+
+    async def hold(self) -> bool:
+        """Takes the lock if it is free, or renews it if this instance holds it."""
+        started = time.monotonic()
+        if await self.redis.eval(_HOLD, 1, self.key, self.token, self.ttl_ms):
             self._valid_until = started + self.ttl_ms / 1000
             return True
         self._valid_until = 0.0
