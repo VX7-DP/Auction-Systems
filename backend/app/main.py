@@ -13,9 +13,10 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import ModuleType
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.requests import HTTPConnection
 
 from app import admin, auctions, auth, bidding, demo, health, metrics, realtime
 from app.config import Settings, get_settings
@@ -29,10 +30,12 @@ SESSION_COOKIE = "auction_session"
 SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 
 
-async def _not_implemented(request: Request, exc: Exception) -> JSONResponse:
+async def _not_implemented(connection: HTTPConnection, exc: Exception) -> JSONResponse:
     # Logged with the traceback, so a NotImplementedError from deep in a library
-    # is not mistaken for an unfilled stub.
-    logger.error("%s %s: not implemented", request.method, request.url.path, exc_info=exc)
+    # is not mistaken for an unfilled stub. Also called for WebSocket connections,
+    # which have no HTTP method.
+    method = connection.scope.get("method", "WEBSOCKET")
+    logger.error("%s %s: not implemented", method, connection.url.path, exc_info=exc)
     return JSONResponse({"detail": "Not implemented yet."}, status_code=501)
 
 

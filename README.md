@@ -45,7 +45,7 @@ docker compose up --build
 ## Tests
 
 ```bash
-docker compose up -d postgres redis
+docker compose up -d --wait postgres redis
 cd backend && uv sync && uv run pytest
 ```
 

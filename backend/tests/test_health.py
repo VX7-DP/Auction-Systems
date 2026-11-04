@@ -1,4 +1,6 @@
+import asyncio
 from collections.abc import Iterator
+from contextlib import AsyncExitStack
 
 import httpx
 import pytest
@@ -6,7 +8,7 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.resources import get_db_engine, get_redis
+from app.resources import get_db_engine, get_health_db_engine, get_redis
 
 # Nothing listens on port 1, so connections are refused at once.
 DEAD_POSTGRES_URL = "postgresql+asyncpg://nobody:nothing@127.0.0.1:1/nothing"
@@ -40,7 +42,7 @@ async def test_health_reports_redis_down(client: httpx.AsyncClient, overrides: d
 
 async def test_health_reports_postgres_down(client: httpx.AsyncClient, overrides: dict) -> None:
     dead_engine = create_async_engine(DEAD_POSTGRES_URL)
-    overrides[get_db_engine] = lambda: dead_engine
+    overrides[get_health_db_engine] = lambda: dead_engine
     try:
         response = await client.get("/api/health")
     finally:
@@ -48,3 +50,22 @@ async def test_health_reports_postgres_down(client: httpx.AsyncClient, overrides
 
     assert response.status_code == 503
     assert response.json() == {"status": "degraded", "postgres": "down", "redis": "up"}
+
+
+async def test_health_reports_postgres_up_while_the_app_pool_is_full(
+    client: httpx.AsyncClient,
+) -> None:
+    """Busy is not down: bids holding every pooled connection must not fail the check."""
+    engine = get_db_engine()
+    async with AsyncExitStack() as held:
+        while True:  # check out connections until the pool is exhausted
+            try:
+                async with asyncio.timeout(0.5):
+                    await held.enter_async_context(engine.connect())
+            except TimeoutError:
+                break
+
+        response = await client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "postgres": "up", "redis": "up"}
