@@ -3,13 +3,16 @@
 These call one sweep directly; test_close_job.py checks that the app runs it by itself.
 """
 
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 
+import pytest
 from redis.asyncio import Redis
 
+from app.bidding import store
 from app.contract import AuctionClosed, AuctionSnapshot
 from tests.bidding.helpers import (
     EventReader,
@@ -17,6 +20,7 @@ from tests.bidding.helpers import (
     accepted,
     bid,
     new_bidder,
+    poll_until,
     redis_now,
     rejected,
     wait_until_redis_time,
@@ -124,3 +128,54 @@ async def test_sweep_leaves_an_auction_before_its_deadline_open(
     assert (await stores.auction(auction.id))["status"] == "open"
     redis_hash = await stores.hash(auction.id)
     assert (redis_hash["status"], redis_hash["seq"]) == ("open", "1")
+
+
+async def test_a_bid_saved_after_the_close_never_loses_to_it(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    stores: Stores,
+    listen: Listen,
+    redis: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Redis accepts Asha's bid before end_at, but the close commits before her save
+    does. Whatever happens to her bid, an accepted bid must never lose to the close:
+    the winner announced, Postgres and Redis all agree with the highest accepted bid."""
+    from app.bidding.sweeper import close_auction
+
+    auction = await _auction_ending_soon(create_auction, redis)
+    asha, ben = new_bidder("Asha"), new_bidder("Ben")
+    first = await bid(auction.id, ben, 120)
+    assert first == accepted(first.bid_id, 1)
+
+    asha_bid_id = uuid.uuid4()
+    release = asyncio.Event()
+    real_save_bid = store.save_bid
+
+    async def save_bid_after_release(*args: object, **kwargs: object) -> None:
+        if args[3].bid_id == asha_bid_id:  # type: ignore[attr-defined]
+            await release.wait()
+        await real_save_bid(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store, "save_bid", save_bid_after_release)
+
+    async with listen(auction.id) as events:
+        late = asyncio.create_task(bid(auction.id, asha, 150, bid_id=asha_bid_id))
+
+        async def decided() -> bool:
+            return (await stores.hash(auction.id)).get("high_amount") == "150"
+
+        await poll_until(decided, task=late, what="Redis to accept Asha's bid")
+        await wait_until_redis_time(redis, auction.end_at)
+        await close_auction(auction.id)
+        release.set()
+        result = await late
+        published = await events.drain(wait=0.5)
+
+    accepted_amounts = [120] + ([150] if result.status == "accepted" else [])
+    highest = max(accepted_amounts)
+    closes = [event for event in published if isinstance(event, AuctionClosed)]
+    assert [event.amount for event in closes] == [highest]
+    row = await stores.auction(auction.id)
+    assert (row["status"], row["high_amount"]) == ("closed", highest)
+    redis_hash = await stores.hash(auction.id)
+    assert (redis_hash["status"], redis_hash["high_amount"]) == ("closed", str(highest))
