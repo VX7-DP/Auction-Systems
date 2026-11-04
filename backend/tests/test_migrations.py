@@ -1,4 +1,5 @@
 from alembic import command
+
 from tests.conftest import alembic_config
 
 
