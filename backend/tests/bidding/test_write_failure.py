@@ -5,6 +5,8 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 
+import httpx
+
 from app.contract import AuctionSnapshot, AuctionUpdate, BidResult
 from tests.bidding.helpers import (
     Bidder,
@@ -110,3 +112,34 @@ async def test_failed_bid_retried_with_its_bid_id_is_saved_as_first_decided(
     assert [
         (row["bid_id"], row["seq"], row["amount"]) for row in await stores.bids(auction.id)
     ] == [(failed.bid_id, 1, 150)]
+
+
+async def test_pause_event_keeps_the_last_saved_high_bid(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    client: httpx.AsyncClient,
+    listen: Listen,
+    hold_bid_insert: HoldBidInsert,
+) -> None:
+    """Asha's bid was never saved and she was told so. Viewers must not see her as the
+    high bidder while the auction is paused: Ben's saved bid still leads."""
+    auction = await create_auction(start_price=100)
+    ben = new_bidder("Ben")
+    saved = await bid(auction.id, ben, 120)
+    assert saved == accepted(saved.bid_id, 1)
+
+    async with listen(auction.id) as events:
+        failed = await _bid_that_postgres_never_takes(
+            hold_bid_insert, auction.id, new_bidder("Asha"), 150
+        )
+        assert failed.status == "error"
+        paused = await events.next()
+
+    assert isinstance(paused, AuctionUpdate) and paused.status == "paused"
+    assert (paused.high_amount, paused.high_bidder_id) == (120, ben.id)
+    response = await client.get(f"/api/auctions/{auction.id}")
+    snapshot = AuctionSnapshot.model_validate(response.json())
+    assert (snapshot.status, snapshot.high_amount, snapshot.high_bidder_id) == (
+        "paused",
+        120,
+        ben.id,
+    )

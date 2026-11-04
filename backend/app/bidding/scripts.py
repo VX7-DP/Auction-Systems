@@ -8,6 +8,9 @@ to 2**53 (MAX_AMOUNT), but tostring() would print them with only 14 digits.
 
 No script takes a seq above the hash's ``ceiling``, which Postgres reserved first (see
 app.bidding.store). DECIDE keeps one seq spare, so a pause never runs out of room.
+
+``high_*`` is the high bid Redis has decided; ``confirmed_*`` the highest one Postgres
+has committed under this load. A pause shows the confirmed one (CLAUDE.md section 10).
 """
 
 import hashlib
@@ -127,7 +130,9 @@ redis.call('HSET', KEYS[1], 'status', ARGV[3], 'end_at_ms', ARGV[4], 'start_pric
   'seq', seq, 'epoch', ARGV[2], 'ceiling', ARGV[12])
 if ARGV[7] ~= '' then
   redis.call('HSET', KEYS[1], 'high_amount', ARGV[7], 'high_bidder_id', ARGV[8],
-    'high_bidder_name', ARGV[9], 'high_is_bot', ARGV[10])
+    'high_bidder_name', ARGV[9], 'high_is_bot', ARGV[10],
+    'confirmed_seq', ARGV[6], 'confirmed_amount', ARGV[7], 'confirmed_bidder_id', ARGV[8],
+    'confirmed_bidder_name', ARGV[9], 'confirmed_is_bot', ARGV[10])
 end
 for i = 13, #ARGV, 2 do
   redis.call('HSET', KEYS[2], ARGV[i], ARGV[i + 1])
@@ -138,7 +143,8 @@ return {'LOADED', seq, reopened}
 )
 
 # KEYS: auction hash, paused set. ARGV: epoch, auction_id.
-# Pauses an open auction, unless Redis has been reloaded since the failed bid.
+# Pauses an open auction, unless Redis has been reloaded since the failed bid. The high
+# bid goes back to the last confirmed one, so the pause never shows an unsaved bid.
 # Returns {"UNCHANGED"} or {"PAUSED", seq}.
 PAUSE = LuaScript(
     """
@@ -150,9 +156,40 @@ if tonumber(state[3]) + 1 > tonumber(state[4] or '0') then
   return {'UNCHANGED'}  -- unreachable while DECIDE keeps a seq spare
 end
 local seq = string.format('%d', tonumber(state[3]) + 1)
+local confirmed = redis.call('HMGET', KEYS[1], 'confirmed_seq', 'confirmed_amount',
+  'confirmed_bidder_id', 'confirmed_bidder_name', 'confirmed_is_bot')
+if confirmed[1] then
+  redis.call('HSET', KEYS[1], 'high_amount', confirmed[2], 'high_bidder_id', confirmed[3],
+    'high_bidder_name', confirmed[4], 'high_is_bot', confirmed[5])
+else
+  redis.call('HDEL', KEYS[1], 'high_amount', 'high_bidder_id', 'high_bidder_name',
+    'high_is_bot')
+end
 redis.call('HSET', KEYS[1], 'status', 'paused', 'seq', seq)
 redis.call('SADD', KEYS[2], ARGV[2])
 return {'PAUSED', seq}
+"""
+)
+
+# KEYS: auction hash.
+# ARGV: epoch, seq, amount, bidder_id, bidder_name, is_bot, channel, message.
+# Runs once Postgres has committed a bid: records it as confirmed if it is the highest
+# committed under this load (a reload already counted it otherwise), then publishes
+# ``message`` on ``channel`` unless it is empty. Returns 1 if it recorded the bid.
+CONFIRM = LuaScript(
+    """
+local recorded = 0
+local state = redis.call('HMGET', KEYS[1], 'epoch', 'confirmed_seq')
+if state[1] == ARGV[1] and (not state[2] or tonumber(ARGV[2]) > tonumber(state[2])) then
+  redis.call('HSET', KEYS[1], 'confirmed_seq', ARGV[2], 'confirmed_amount', ARGV[3],
+    'confirmed_bidder_id', ARGV[4], 'confirmed_bidder_name', ARGV[5],
+    'confirmed_is_bot', ARGV[6])
+  recorded = 1
+end
+if ARGV[8] ~= '' then
+  redis.call('PUBLISH', ARGV[7], ARGV[8])
+end
+return recorded
 """
 )
 

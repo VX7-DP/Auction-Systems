@@ -93,6 +93,7 @@ export interface AuctionFeed {
 }
 
 const BUFFER_LIMIT = 500
+const CLOSE_NOT_FOUND = 4404
 const LOAD_RETRY_BASE_MS = 1_000
 const GAP_RETRY_BASE_MS = 250
 const RETRY_MAX_MS = 5_000
@@ -362,10 +363,16 @@ export function createAuctionFeed(options: AuctionFeedOptions): AuctionFeed {
     current.onmessage = (message) => {
       if (socket === current) onMessage(message.data)
     }
-    current.onclose = () => {
+    current.onclose = (event) => {
       if (socket !== current) return
       socket = null
       if (stopped || finished) return
+      if (event.code === CLOSE_NOT_FOUND) {
+        // No such auction (CLAUDE.md section 10): don't reconnect.
+        finish()
+        emit({ phase: 'not_found', connection: 'closed' })
+        return
+      }
       emit({ connection: 'reconnecting' })
       startPolling()
       reconnectTimer = setTimeout(() => {

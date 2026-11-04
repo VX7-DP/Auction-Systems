@@ -280,6 +280,13 @@ describe('reconnecting', () => {
     expect(fetches.length).toBeGreaterThan(0)
   })
 
+  test('a 4404 close does not reconnect, even before the snapshot answers', async () => {
+    makeFeed()
+    lastSocket().onclose?.({ code: 4404 })
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(sockets).toHaveLength(1)
+  })
+
   test('wake() reconnects at once instead of waiting out the backoff', async () => {
     await live(1)
     lastSocket().drop()

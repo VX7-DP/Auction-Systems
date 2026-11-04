@@ -66,6 +66,9 @@ async def close_auction(auction_id: uuid.UUID) -> None:
                     amount=winner.amount,
                 ),
             )
+            # The close bumped load_epoch: reload so Redis matches Postgres again and
+            # drops any decided bid the close fenced off.
+            await reload_auction(auction_id)
             return
         if await store.auction_status(resources.db_engine, auction_id) in ("closed", None):
             return

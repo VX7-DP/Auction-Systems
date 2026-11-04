@@ -153,7 +153,7 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 - `GET /api/session` → `{bidder_id, display_name}`, or 401.
 - `GET /api/auctions` → `[{id, title, status, high_amount, end_at}]`.
 - `GET /api/auctions/{id}` → snapshot: `{id, title, start_price, end_at, status, seq, high_amount, high_bidder_id, high_bidder_name, high_is_bot, recent_bids: [{seq, amount, bidder_name, is_bot, created_at}]}`.
-- `POST /api/auctions/{id}/bids {bid_id, amount}` → `{bid_id, status: accepted | rejected | error, reason?, seq?}`, where `reason` is `too_low`, `closed`, `paused` or `not_found`.
+- `POST /api/auctions/{id}/bids {bid_id, amount}` → `{bid_id, status: accepted | rejected | error, reason?, seq?}`, where `reason` is `too_low`, `closed`, `paused`, `not_found` or `duplicate_bid_id` (the `bid_id` was already used on another auction; make a new one).
 - `POST /api/admin/auctions {title, start_price, end_at}` with an `X-Admin-Password` header → the new auction.
 - `GET /api/health` → Postgres and Redis status.
 
@@ -176,8 +176,8 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 
 **Redis:**
 
-- Hash `auction:{id}` with `status`, `end_at_ms`, `start_price`, `high_amount`, `high_bidder_id`, `high_bidder_name`, `high_is_bot`, `seq`, `epoch` (the `load_epoch` it was loaded under) and `ceiling` (the highest seq it may hand out).
-- Hash encodings: every value is a string. `status` is `open`, `paused` or `closed`. Number fields are base-10 integers: amounts in minor units, and `end_at_ms` in milliseconds since the Unix epoch. `high_bidder_id` is a lowercase UUID, `high_bidder_name` is plain text, and `high_is_bot` is `1` or `0`. The `high_*` fields are absent until the first accepted bid.
+- Hash `auction:{id}` with `status`, `end_at_ms`, `start_price`, `high_amount`, `high_bidder_id`, `high_bidder_name`, `high_is_bot`, `seq`, `epoch` (the `load_epoch` it was loaded under), `ceiling` (the highest seq it may hand out), and `confirmed_seq`, `confirmed_amount`, `confirmed_bidder_id`, `confirmed_bidder_name`, `confirmed_is_bot` (the highest bid Postgres has committed under this load).
+- Hash encodings: every value is a string. `status` is `open`, `paused` or `closed`. Number fields are base-10 integers: amounts in minor units, and `end_at_ms` in milliseconds since the Unix epoch. `high_bidder_id` is a lowercase UUID, `high_bidder_name` is plain text, and `high_is_bot` is `1` or `0`. The `high_*` fields are absent until the first accepted bid, and the `confirmed_*` fields (same encodings) until the first committed one. While `status` is `paused`, `high_*` equals `confirmed_*`, so a pause never shows a bid that wasn't saved.
 - Pub/Sub channel `auction:{id}:events`, carrying the WebSocket messages above as JSON.
 - Locks `lock:job:{name}`.
 

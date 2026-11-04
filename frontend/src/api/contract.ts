@@ -7,7 +7,7 @@ export const MAX_AMOUNT = Number.MAX_SAFE_INTEGER
 
 export type AuctionStatus = 'open' | 'paused' | 'closed'
 export type BidStatus = 'accepted' | 'rejected' | 'error'
-export type RejectReason = 'too_low' | 'closed' | 'paused' | 'not_found'
+export type RejectReason = 'too_low' | 'closed' | 'paused' | 'not_found' | 'duplicate_bid_id'
 
 /** POST and GET /api/session. */
 export interface Bidder {

@@ -115,6 +115,8 @@ function rejectionMessage(reason: string | undefined): BidMessage {
       return { tone: 'info', text: 'Bidding is paused for a moment. Please try again shortly.' }
     case 'not_found':
       return { tone: 'error', text: 'This auction no longer exists.' }
+    case 'duplicate_bid_id':
+      return { tone: 'error', text: 'Something went wrong with that bid. Please place it again.' }
     default:
       return { tone: 'error', text: 'Your bid was not accepted.' }
   }

@@ -5,6 +5,8 @@ while holding the auction row FOR UPDATE. A bid write first locks the same row a
 checks the epoch its Redis decision was made under. So a write either finishes before
 a reload reads Postgres (the reload waits for its lock), or it sees the new epoch and
 is refused: a bid decided against an older load can never be saved after a reload.
+Closing bumps load_epoch the same way, so a bid that hasn't reached Postgres by the
+time the close commits can't be saved after it either.
 
 The seq ceiling: Redis shows seqs before Postgres records them (a pause, or a snapshot
 of a bid still being saved). So Redis may only hand out seqs up to auctions.seq_ceiling,
@@ -272,13 +274,15 @@ class Winner:
 async def record_close(
     engine: AsyncEngine, auction_id: uuid.UUID, epoch: int, seq: int
 ) -> Winner | None:
-    """Marks the auction closed. Returns the winner only to the call that closed it, so
-    the close is announced once; None if it was closed already or fenced off."""
+    """Marks the auction closed and bumps load_epoch, which fences off any bid decided
+    before the close but not yet saved. Returns the winner only to the call that closed
+    it, so the close is announced once; None if it was closed already or fenced off."""
     async with engine.begin() as connection:
         row = (
             await connection.execute(
                 text(
-                    "UPDATE auctions SET status = 'closed', high_seq = GREATEST(high_seq, :seq)"
+                    "UPDATE auctions SET status = 'closed', high_seq = GREATEST(high_seq, :seq),"
+                    " load_epoch = load_epoch + 1"
                     " WHERE id = :id AND status <> 'closed' AND load_epoch = :epoch"
                     " RETURNING high_amount, high_bidder_id, high_bidder_name"
                 ),
