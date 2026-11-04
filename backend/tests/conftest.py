@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from app.config import Settings
 from app.main import create_app
+from app.models import Base
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://auction:auction@localhost:5432/auction_test"
@@ -69,6 +70,12 @@ async def _recreate_schema() -> None:
 @pytest.fixture(scope="session")
 def migrated_database() -> str:
     """URL of the test database, rebuilt from the migrations once per test run."""
+    database = make_url(TEST_DATABASE_URL).database or ""
+    if not database.endswith("_test"):
+        raise pytest.UsageError(
+            f"TEST_DATABASE_URL names database {database!r}. The tests drop and rebuild "
+            "its schema, so its name must end in '_test'."
+        )
     asyncio.run(_recreate_schema())
     command.upgrade(alembic_config(), "head")
     return TEST_DATABASE_URL
@@ -103,7 +110,8 @@ async def db_engine(migrated_database: str) -> AsyncIterator[AsyncEngine]:
     """Engine on the test database, with every table emptied first."""
     engine = create_async_engine(migrated_database)
     async with engine.begin() as connection:
-        await connection.execute(text("TRUNCATE bids, auctions"))
+        tables = ", ".join(f'"{table.name}"' for table in Base.metadata.sorted_tables)
+        await connection.execute(text(f"TRUNCATE {tables}"))
     yield engine
     await engine.dispose()
 

@@ -17,6 +17,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.config import async_database_url
 from app.models import Base
 
 config = context.config
@@ -31,7 +32,7 @@ def _database_url() -> str:
     url = config.get_main_option("sqlalchemy.url") or os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError("Set DATABASE_URL (e.g. postgresql+asyncpg://user:pass@host/db).")
-    return url
+    return async_database_url(url)
 
 
 def run_migrations_offline() -> None:

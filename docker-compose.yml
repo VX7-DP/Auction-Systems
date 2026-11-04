@@ -36,6 +36,7 @@ services:
 
   migrate:
     build: ./backend
+    image: auction-backend:dev
     command: ["alembic", "upgrade", "head"]
     environment:
       DATABASE_URL: postgresql+asyncpg://auction:auction@postgres:5432/auction
@@ -45,6 +46,7 @@ services:
 
   backend:
     build: ./backend
+    image: auction-backend:dev
     environment:
       DATABASE_URL: postgresql+asyncpg://auction:auction@postgres:5432/auction
       REDIS_URL: redis://redis:6379/0

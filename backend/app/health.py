@@ -9,15 +9,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.contract import Health
-from app.resources import get_redis, get_resources
+from app.resources import get_db_engine, get_redis
 
 CHECK_TIMEOUT_SECONDS = 2.0
 
 router = APIRouter(prefix="/api", tags=["health"])
-
-
-def get_db_engine() -> AsyncEngine:
-    return get_resources().db_engine
 
 
 async def _postgres_up(engine: AsyncEngine) -> bool:

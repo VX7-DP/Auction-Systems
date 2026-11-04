@@ -69,5 +69,9 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+def get_db_engine() -> AsyncEngine:
+    return get_resources().db_engine
+
+
 def get_redis() -> Redis:
     return get_resources().redis

@@ -6,8 +6,7 @@ from fastapi import FastAPI
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.health import get_db_engine
-from app.resources import get_redis
+from app.resources import get_db_engine, get_redis
 
 # Nothing listens on port 1, so connections are refused at once.
 DEAD_POSTGRES_URL = "postgresql+asyncpg://nobody:nothing@127.0.0.1:1/nothing"

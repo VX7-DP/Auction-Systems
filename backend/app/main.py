@@ -8,6 +8,7 @@ Feature modules plug in without editing this file. Each package in MODULES expor
   the shared resources open and exited before they close. Background jobs start here.
 """
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import ModuleType
@@ -22,11 +23,16 @@ from app.resources import open_resources
 
 MODULES: tuple[ModuleType, ...] = (bidding, admin, auctions, realtime, demo, metrics)
 
+logger = logging.getLogger(__name__)
+
 SESSION_COOKIE = "auction_session"
 SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 
 
 async def _not_implemented(request: Request, exc: Exception) -> JSONResponse:
+    # Logged with the traceback, so a NotImplementedError from deep in a library
+    # is not mistaken for an unfilled stub.
+    logger.error("%s %s: not implemented", request.method, request.url.path, exc_info=exc)
     return JSONResponse({"detail": "Not implemented yet."}, status_code=501)
 
 

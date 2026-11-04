@@ -13,7 +13,15 @@ from datetime import UTC, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AfterValidator, AwareDatetime, BaseModel, Field, StringConstraints, TypeAdapter
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    Field,
+    StrictInt,
+    StringConstraints,
+    TypeAdapter,
+)
 
 # 2**53 - 1 is the largest integer that is exact both as a JavaScript number and as
 # a double inside Redis Lua, so every amount stays exact end to end.
@@ -25,8 +33,9 @@ def _to_utc(value: datetime) -> datetime:
 
 
 UtcDatetime = Annotated[AwareDatetime, AfterValidator(_to_utc)]
-Amount = Annotated[int, Field(ge=0, le=MAX_AMOUNT)]
-PositiveAmount = Annotated[int, Field(gt=0, le=MAX_AMOUNT)]
+# Strict: JSON true, "100" or 100.0 are rejected, not coerced.
+Amount = Annotated[StrictInt, Field(ge=0, le=MAX_AMOUNT)]
+PositiveAmount = Annotated[StrictInt, Field(gt=0, le=MAX_AMOUNT)]
 DisplayName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
