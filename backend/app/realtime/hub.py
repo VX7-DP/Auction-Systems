@@ -4,7 +4,7 @@ Each socket gets a ``Subscription``: a bounded queue the listener fills and the
 socket's own send loop drains, so a slow client never holds up the others. The hub
 is in-process connection state only; everything it forwards comes from Redis.
 
-Close codes the server sends (not in section 10 yet):
+Close codes the server sends (CLAUDE.md section 10):
 
 - ``CLOSE_NOT_FOUND`` (4404): no such auction. Don't reconnect.
 - ``CLOSE_SERVICE_RESTART`` (1012): this server lost, regained or is closing its Redis
