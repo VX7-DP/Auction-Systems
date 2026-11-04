@@ -32,7 +32,8 @@ These are client-side routes, so the production web server must serve `index.htm
 
 - Every event carries `seq`. The page applies events strictly in order and ignores any it already has.
 - When a socket opens (the first time and after every reconnect), the page fetches a fresh snapshot, because anything published before the subscription only shows up there. Events that arrive meanwhile are buffered and replayed after it.
-- A `seq` gap means a message was lost (Redis Pub/Sub doesn't redeliver), so the page refetches the snapshot.
+- A `seq` gap means a message was lost (Redis Pub/Sub doesn't redeliver), so the page refetches the snapshot. After Redis loses an auction, `seq` jumps once to the next reserved block (CLAUDE.md section 4); the page treats that like any other gap.
+- The server's WebSocket close codes, and what the page should do for each, are in CLAUDE.md section 10.
 - Dropped connections reconnect with backoff. While disconnected, the page polls the snapshot every 5 seconds, so it still updates on networks that block WebSockets.
 - Each bid has a `bid_id`. It is reused only to retry a bid whose outcome is unknown (network failure, timeout, 5xx), so a retry can't place a bid twice.
 - The countdown is the server's `end_at` minus the browser clock. The server decides when bidding stops; at zero the page shows "Closing…" until the close event arrives.

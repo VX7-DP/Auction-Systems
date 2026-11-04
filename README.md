@@ -41,6 +41,7 @@ docker compose up --build
 - API docs: http://localhost:8000/api/docs
 - Health: http://localhost:8000/api/health
 - The admin password is `admin` (local only).
+- On Windows, if Docker says a port is "not available" or "forbidden", see the port note in [docs/development.md](docs/development.md#run-the-whole-stack).
 
 ## Tests
 
@@ -53,6 +54,8 @@ cd backend && uv sync && uv run pytest
 cd frontend && npm ci && npm test
 ```
 
+The end-to-end test drives the whole stack, two bidders and the simulated bidders through a Redis restart to the close. CI runs it on every push; to run it locally, see [docs/development.md](docs/development.md#end-to-end-test).
+
 Lint, migrations, and how to add code are covered in [docs/development.md](docs/development.md).
 
 ## Repository layout
@@ -60,7 +63,7 @@ Lint, migrations, and how to add code are covered in [docs/development.md](docs/
 ```
 backend/    FastAPI app (app/), Alembic migrations (migrations/), tests (tests/)
 frontend/   React + TypeScript app
-deploy/     Production setup (in progress)
+deploy/     Production setup for the one-VM deploy
 loadtest/   Load tests (planned)
 docs/       Developer and project docs
 ```
@@ -69,3 +72,4 @@ docs/       Developer and project docs
 
 - [CLAUDE.md](CLAUDE.md): the project spec, with decisions, the interface contract and the build plan.
 - [docs/development.md](docs/development.md): running, testing and extending the code.
+- [docs/deploy.md](docs/deploy.md): deploying to one VM, with backups and restore.
