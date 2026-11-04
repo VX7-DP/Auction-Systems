@@ -160,6 +160,13 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 
 - `auction_update {auction_id, seq, high_amount, high_bidder_id, high_bidder_name, is_bot, end_at, status}`. The client shows "you've been outbid" when the high bidder changes from the current user to someone else.
 - `auction_closed {auction_id, seq, winner_id, winner_name, amount}`.
+- Clients ignore a `type` they don't know. Keepalive is uvicorn's protocol-level ping every 20 seconds; there is no heartbeat message.
+- **Close codes** the server sends, and what the client does:
+  - `4404`: no such auction. Don't reconnect.
+  - `1012`: the server lost, regained or is closing its Redis subscription, or is restarting, so events may have been missed. Reconnect and resync from the snapshot.
+  - `1013`: the server isn't subscribed to Redis yet. Reconnect with backoff.
+  - `1008`: the client fell more than 100 messages behind. Reconnect and resync. FastAPI also sends `1008` when the id isn't a UUID; the snapshot then answers 422, so stop.
+  - Any other close, or a dropped connection: reconnect with backoff and resync.
 
 **Postgres:**
 
@@ -169,7 +176,8 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 **Redis:**
 
 - Hash `auction:{id}` with `status`, `end_at_ms`, `start_price`, `high_amount`, `high_bidder_id`, `high_bidder_name`, `high_is_bot`, `seq` and `epoch` (the `load_epoch` it was loaded under).
-- Pub/Sub channel `auction:{id}:events`, carrying the WebSocket messages above.
+- Hash encodings: every value is a string. `status` is `open`, `paused` or `closed`. Number fields are base-10 integers: amounts in minor units, and `end_at_ms` in milliseconds since the Unix epoch. `high_bidder_id` is a lowercase UUID, `high_bidder_name` is plain text, and `high_is_bot` is `1` or `0`. The `high_*` fields are absent until the first accepted bid.
+- Pub/Sub channel `auction:{id}:events`, carrying the WebSocket messages above as JSON.
 - Locks `lock:job:{name}`.
 
 **Code interfaces (session 0 creates the stubs):**
