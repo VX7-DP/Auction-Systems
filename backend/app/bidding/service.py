@@ -12,7 +12,7 @@ from uuid import UUID
 from app.bidding import scripts, store
 from app.bidding.events import publish, publish_current_state
 from app.bidding.loader import reload_auction
-from app.bidding.settings import bid_slots, get_bidding_settings
+from app.bidding.settings import get_bidding_settings
 from app.contract import AuctionUpdate, BidResult, auction_key
 from app.resources import get_resources
 
@@ -34,8 +34,7 @@ async def place_bid(
 ) -> BidResult:
     """Decide the bid in Redis (Lua CAS), commit it to Postgres, then publish it."""
     try:
-        async with bid_slots():
-            return await _place_bid(auction_id, bid_id, bidder_id, bidder_name, amount, is_bot)
+        return await _place_bid(auction_id, bid_id, bidder_id, bidder_name, amount, is_bot)
     except Exception:
         logger.exception("Bid %s on auction %s failed", bid_id, auction_id)
         return BidResult(bid_id=bid_id, status="error")
