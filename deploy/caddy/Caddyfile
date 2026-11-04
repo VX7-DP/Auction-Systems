@@ -1,0 +1,42 @@
+# The TLS edge for the one-VM deploy (docs/deploy.md). It serves the built front end and
+# proxies /api and /ws to the backend.
+#
+# SITE_ADDRESS comes from .env:
+# - auction.summittech.in in production, with a certificate from Let's Encrypt.
+# - localhost for a local test, with a certificate from Caddy's internal CA.
+{
+	# Local tests use the internal CA. Don't try to add it to the container's trust store.
+	skip_install_trust
+}
+
+{$SITE_ADDRESS} {
+	# The backend owns /api and /ws, and the front end owns every other path (CLAUDE.md
+	# section 10). WebSocket upgrades pass through reverse_proxy unchanged.
+	@backend path /api/* /ws/*
+	handle @backend {
+		reverse_proxy backend:8000 {
+			# While the backend restarts (a redeploy), hold requests and keep retrying the
+			# connection instead of answering 502 straight away.
+			lb_try_duration 30s
+		}
+	}
+
+	# Build assets have content hashes in their names, so they never change. There is no
+	# fallback to index.html here, so a missing asset gets a real 404.
+	handle /assets/* {
+		root * /srv
+		header Cache-Control "public, max-age=31536000, immutable"
+		encode zstd gzip
+		file_server
+	}
+
+	# Everything else is the single-page app. Unknown paths get index.html. no-cache makes
+	# the browser revalidate it, so a redeploy shows up straight away.
+	handle {
+		root * /srv
+		header Cache-Control "no-cache"
+		encode zstd gzip
+		try_files {path} /index.html
+		file_server
+	}
+}
