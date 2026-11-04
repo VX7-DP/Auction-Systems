@@ -5,8 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.demo.bots import SimulatedBidders
-from app.demo.job_lock import JobLock, run_while_holding
 from app.demo.settings import DemoSettings
+from app.job_lock import JobLock, run_while_holding
 from app.resources import get_resources
 
 BOTS_JOB = "simulated_bidders"

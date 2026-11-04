@@ -13,7 +13,8 @@ from app.bidding import scripts, store
 from app.bidding.events import publish
 from app.bidding.loader import reload_auction, reserve_seqs
 from app.bidding.settings import BiddingSettings
-from app.contract import AuctionClosed, auction_key, job_lock_key
+from app.contract import AuctionClosed, auction_key
+from app.job_lock import JobLock
 from app.resources import get_resources
 
 logger = logging.getLogger(__name__)
@@ -74,22 +75,17 @@ async def close_auction(auction_id: uuid.UUID) -> None:
 
 async def run_sweeper(settings: BiddingSettings) -> None:
     """Sweeps every interval while this instance holds the job lock."""
-    redis = get_resources().redis
-    lock = job_lock_key(JOB_NAME)
-    token = uuid.uuid4().hex
+    lock = JobLock(get_resources().redis, JOB_NAME, ttl_seconds=settings.job_lock_ttl_ms / 1000)
     try:
         while True:
             try:
-                holds = await scripts.HOLD_LOCK(
-                    redis, [lock], [token, str(settings.job_lock_ttl_ms)]
-                )
-                if holds == 1:
+                if await lock.hold():
                     await sweep_once()
             except Exception:
                 logger.exception("Close sweeper pass failed")
             await asyncio.sleep(settings.sweep_interval_ms / 1000)
     finally:
         try:
-            await scripts.RELEASE_LOCK(redis, [lock], [token])
+            await lock.release()
         except Exception:
             logger.warning("Could not release the %s job lock", JOB_NAME)

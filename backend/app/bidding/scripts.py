@@ -201,22 +201,6 @@ return 1
 """
 )
 
-# KEYS: lock. ARGV: token, ttl_ms. Takes the lock, or renews it if this token holds it.
-HOLD_LOCK = LuaScript(
-    """
-local holder = redis.call('GET', KEYS[1])
-if holder == ARGV[1] then
-  redis.call('PEXPIRE', KEYS[1], ARGV[2])
-  return 1
-end
-if not holder then
-  redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
-  return 1
-end
-return 0
-"""
-)
-
 # KEYS: lock. ARGV: token. Releases the lock only if this token holds it.
 RELEASE_LOCK = LuaScript(
     """

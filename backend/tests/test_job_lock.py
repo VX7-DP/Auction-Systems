@@ -1,11 +1,11 @@
-"""The Redis job lock that keeps background jobs on one instance (SET NX PX, renewed)."""
+"""The Redis lock that keeps background jobs on one instance (SET NX PX, renewed)."""
 
 import asyncio
 
 from redis.asyncio import Redis
 
 from app.contract import job_lock_key
-from app.demo.job_lock import JobLock, run_while_holding
+from app.job_lock import JobLock, run_while_holding
 from tests.realtime.conftest import wait_until
 
 
@@ -110,3 +110,28 @@ async def test_the_job_stops_when_the_lock_is_lost(redis: Redis) -> None:
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_hold_takes_a_free_lock_and_renews_its_own(redis: Redis) -> None:
+    """What the close sweeper does before each pass."""
+    lock = JobLock(redis, "job", ttl_seconds=5)
+
+    assert await lock.hold()
+    assert await redis.get(job_lock_key("job")) == lock.token
+    await redis.pexpire(job_lock_key("job"), 100)
+
+    assert await lock.hold()
+    assert await redis.pttl(job_lock_key("job")) > 1_000
+    assert lock.held()
+
+
+async def test_hold_refuses_a_lock_another_instance_holds(redis: Redis) -> None:
+    first, second = JobLock(redis, "job", ttl_seconds=5), JobLock(redis, "job", ttl_seconds=5)
+    assert await first.hold()
+
+    assert not await second.hold()
+    assert not second.held()
+    assert await redis.get(job_lock_key("job")) == first.token
+
+    await first.release()
+    assert await second.hold()
