@@ -9,11 +9,13 @@ import logging
 from typing import Literal
 from uuid import UUID
 
+from redis.exceptions import RedisError
+
 from app.bidding import scripts, store
-from app.bidding.events import publish, publish_current_state
+from app.bidding.events import publish_current_state
 from app.bidding.loader import reload_auction, reserve_seqs
 from app.bidding.settings import get_bidding_settings
-from app.contract import AuctionUpdate, BidResult, auction_key
+from app.contract import AuctionUpdate, BidResult, auction_events_channel, auction_key
 from app.resources import get_resources
 
 logger = logging.getLogger(__name__)
@@ -74,20 +76,19 @@ async def _place_bid(
 
         outcome = await _save(auction_id, epoch, bid)
         if outcome == "saved":
+            update = None
             if kind == "ACCEPTED":
-                await publish(
-                    redis,
-                    AuctionUpdate(
-                        auction_id=auction_id,
-                        seq=bid.seq,
-                        high_amount=bid.amount,
-                        high_bidder_id=bid.bidder_id,
-                        high_bidder_name=bid.bidder_name,
-                        is_bot=bid.is_bot,
-                        end_at=store.from_ms(int(decision[3])),
-                        status="open",
-                    ),
+                update = AuctionUpdate(
+                    auction_id=auction_id,
+                    seq=bid.seq,
+                    high_amount=bid.amount,
+                    high_bidder_id=bid.bidder_id,
+                    high_bidder_name=bid.bidder_name,
+                    is_bot=bid.is_bot,
+                    end_at=store.from_ms(int(decision[3])),
+                    status="open",
                 )
+            await _confirm(auction_id, epoch, bid, update)
             return BidResult(bid_id=bid_id, status="accepted", seq=bid.seq)
         if outcome == "fenced":
             # The decision came from an outdated Redis copy. Reload it unless another
@@ -134,6 +135,31 @@ async def _save(auction_id: UUID, epoch: int, bid: store.BidRecord) -> SaveOutco
                 error,
             )
     return "failed"
+
+
+async def _confirm(
+    auction_id: UUID, epoch: int, bid: store.BidRecord, update: AuctionUpdate | None
+) -> None:
+    """Records the committed bid as confirmed in Redis and publishes its update, in one
+    round trip. Best effort: the bid is already saved. If this fails, a later pause
+    shows an older confirmed bid, never an unsaved one; viewers resync on the gap."""
+    try:
+        await scripts.CONFIRM(
+            get_resources().redis,
+            [auction_key(auction_id)],
+            [
+                str(epoch),
+                str(bid.seq),
+                str(bid.amount),
+                str(bid.bidder_id),
+                bid.bidder_name,
+                "1" if bid.is_bot else "0",
+                auction_events_channel(auction_id),
+                update.model_dump_json() if update is not None else "",
+            ],
+        )
+    except RedisError:
+        logger.warning("Could not confirm or publish seq %s of auction %s", bid.seq, auction_id)
 
 
 async def _pause(auction_id: UUID, epoch: int) -> None:

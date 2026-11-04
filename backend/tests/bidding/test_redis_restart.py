@@ -59,6 +59,12 @@ async def test_redis_restart_keeps_every_confirmed_bid_and_the_high_bid(
         "high_bidder_id": str(ben.id),
         "high_bidder_name": "Ben",
         "high_is_bot": "0",
+        # Everything loaded from Postgres is committed, so the high bid is confirmed.
+        "confirmed_seq": "2",
+        "confirmed_amount": "200",
+        "confirmed_bidder_id": str(ben.id),
+        "confirmed_bidder_name": "Ben",
+        "confirmed_is_bot": "0",
         "epoch": restored.get("epoch"),
     }
     # The reload is a new load: it moved the epoch on, in both stores.
