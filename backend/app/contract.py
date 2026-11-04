@@ -178,7 +178,8 @@ auction_event_adapter: TypeAdapter[AuctionUpdate | AuctionClosed] = TypeAdapter(
 
 def auction_key(auction_id: UUID) -> str:
     """Hash with status, end_at_ms, start_price, high_amount, high_bidder_id,
-    high_bidder_name, high_is_bot and seq."""
+    high_bidder_name, high_is_bot, seq and epoch (the auctions.load_epoch it was
+    loaded under)."""
     return f"auction:{auction_id}"
 
 

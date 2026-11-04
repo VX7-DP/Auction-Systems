@@ -54,6 +54,9 @@ class Auction(Base):
     high_bidder_name: Mapped[str | None] = mapped_column(Text)
     # seq of the latest state change applied here; writes use WHERE high_seq < :seq.
     high_seq: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # Bumped each time the auction is loaded into Redis. A bid write commits only if
+    # the epoch it was decided under is still current (CLAUDE.md section 4).
+    load_epoch: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
 
 
 class Bid(Base):
