@@ -1,0 +1,115 @@
+# Production override for the one-VM deploy (CLAUDE.md section 8, runbook in docs/deploy.md).
+# It is layered on top of the base docker-compose.yml. The .env in the repo root sets
+# COMPOSE_FILE (see deploy/.env.example), so plain `docker compose ...` uses both files.
+#
+# Compose resolves every path in this file from the base file's directory (the repo root).
+#
+# Changes from the base stack:
+# - Only Caddy publishes ports (80 and 443). Docker-published ports bypass a host firewall
+#   such as UFW, so nothing else may publish.
+# - Secrets come from .env, and Compose refuses to start if one is missing.
+# - Caddy serves the built front end. The Vite dev server (`frontend`) does not run.
+# - A `backup` service takes a nightly pg_dump.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "5"
+
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports: !reset []
+    restart: unless-stopped
+    logging: *logging
+
+  redis:
+    ports: !reset []
+    restart: unless-stopped
+    logging: *logging
+
+  migrate:
+    image: auction-backend:prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://auction:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/auction
+    logging: *logging
+
+  backend:
+    image: auction-backend:prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://auction:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/auction
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      COOKIE_SECURE: "true"
+      # uvicorn trusts the X-Forwarded-* headers Caddy sends: client IP and https/wss scheme.
+      # "*" is safe only because this port is not published, so only containers on this
+      # network can reach the backend.
+      FORWARDED_ALLOW_IPS: "*"
+    ports: !reset []
+    restart: unless-stopped
+    logging: *logging
+
+  # The Vite dev server stays out of production. Caddy serves the built front end.
+  frontend:
+    profiles: [dev]
+
+  caddy:
+    build:
+      # The front end is the main context, so frontend/.dockerignore applies.
+      context: ./frontend
+      dockerfile: ../deploy/caddy/Dockerfile
+      additional_contexts:
+        caddyconf: ./deploy/caddy
+    image: auction-caddy:prod
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set SITE_ADDRESS in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      # Certificates and the ACME account. Losing them forces new certificates, which
+      # Let's Encrypt rate-limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *logging
+
+  backup:
+    build: ./deploy/backup
+    image: auction-backup:prod
+    command: ["backup", "daily"]
+    environment:
+      PGHOST: postgres
+      PGUSER: auction
+      PGDATABASE: auction
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BACKUP_TIME: ${BACKUP_TIME:-03:15}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      # A host directory, not a Docker volume, so `docker compose down --volumes` can't
+      # delete the backups along with the database.
+      - ${BACKUP_DIR:-/var/backups/auction}:/backups
+    depends_on:
+      # After migrations, so the first dump on a fresh deploy holds the schema.
+      migrate:
+        condition: service_completed_successfully
+    init: true
+    healthcheck:
+      # Healthy while a dump from the last 26 hours exists.
+      test: ["CMD-SHELL", "find /backups -maxdepth 1 -name 'auction-*.dump' -mmin -1560 | grep -q ."]
+      interval: 10m
+      timeout: 10s
+      start_period: 5m
+      start_interval: 5s
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:
