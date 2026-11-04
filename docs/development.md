@@ -13,6 +13,13 @@ docker compose up --build
 - The admin password is `admin` (local only).
 - Redis runs without persistence, so `docker compose restart redis` is a real Redis restart. Postgres keeps its data in the `pgdata` volume until `docker compose down --volumes`.
 - If a host port is taken, change it with `POSTGRES_PORT`, `REDIS_PORT`, `BACKEND_PORT` or `FRONTEND_PORT`.
+- **Windows: "ports are not available … forbidden by its access permissions".** Windows won't let Docker bind that port, because a local PostgreSQL already uses it or the port falls in a range Windows reserves for Hyper-V/WSL. Move the host ports; the containers still talk to each other on the usual ports inside Docker. In PowerShell:
+
+  ```powershell
+  $env:POSTGRES_PORT=15432; $env:REDIS_PORT=16379; docker compose up --build
+  ```
+
+  To keep them, put `POSTGRES_PORT=15432` and `REDIS_PORT=16379` in a `.env` file in the repo root (git ignores it). To see which cause it was: `netstat -ano | findstr :5432` shows a process using the port, and `netsh int ipv4 show excludedportrange protocol=tcp` lists the reserved ranges. With moved ports, point the backend tests at them too: `TEST_DATABASE_URL=postgresql://auction:auction@localhost:15432/auction_test` and `TEST_REDIS_URL=redis://localhost:16379/15` (and `E2E_DATABASE_URL` for the end-to-end test).
 
 ## Backend (`backend/`)
 
@@ -24,6 +31,8 @@ uv run pytest
 ```
 
 The tests need Postgres and Redis on localhost. One way is `docker compose up -d --wait postgres redis` (`--wait` holds until both are ready; without it the first test run can fail to connect). They use the database `auction_test` (created automatically) and Redis database 15. To point them elsewhere, set `TEST_DATABASE_URL` and `TEST_REDIS_URL`. The tests drop and rebuild the test database's schema, so its name must end in `_test`; any other name is refused.
+
+The bid engine reserves seqs in Postgres in blocks before Redis hands them out (CLAUDE.md section 4). `BIDDING_SEQ_BLOCK` sets the block size, default 1000; it is also the jump in `seq` after Redis loses an auction. The other `BIDDING_*` settings are in `app/bidding/settings.py`.
 
 To run the API on the host, set `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `ADMIN_PASSWORD` and `COOKIE_SECURE=false`, either in the environment or in `backend/.env`. Then run:
 
@@ -45,7 +54,7 @@ uv run alembic revision --autogenerate -m "what changed"
   - A module can also export `lifespan(app)`, an async context manager that runs for the app's lifetime.
   - `main.py` picks both up, so don't edit `main.py`.
 - Shared pools: use `get_db_session` and `get_redis` as FastAPI dependencies, and `app.resources.get_resources()` in plain functions such as `place_bid`.
-- Background jobs start in a module's `lifespan`, only when `settings.run_background_jobs` is true. They hold the Redis lock `job_lock_key(name)`.
+- Background jobs start in a module's `lifespan`, only when `settings.run_background_jobs` is true. They hold the Redis lock `job_lock_key(name)` through the shared `app/job_lock.py`: `run_while_holding` runs a long-lived job only while the lock is held (the simulated bidders), and `hold()` takes or renews it before each pass (the close sweeper).
 - Settings that only one module needs go in that module's own `pydantic_settings.BaseSettings` subclass, not in `app/config.py`.
 - Tests for a module go in `tests/<module>/`.
   - The shared fixtures are in `tests/conftest.py`: `app`, `client`, `client_factory`, `bidder_client`, `admin_headers`, `db_session`, `redis` and `make_settings`.

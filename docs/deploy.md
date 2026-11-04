@@ -74,7 +74,7 @@ This is the runbook for the one-VM option in CLAUDE.md section 8. The whole Comp
 8. **Check.**
    - `curl -fsS https://auction.summittech.in/api/health` prints `{"status":"ok","postgres":"up","redis":"up"}`.
    - `http://auction.summittech.in` redirects to HTTPS.
-   - A WebSocket upgrade works through Caddy. Run the command below with an id from `GET /api/auctions`; it should print `HTTP/1.1 101 Switching Protocols`.
+   - A WebSocket upgrade works through Caddy. Run the command below with an id from `GET /api/auctions`; it should print `HTTP/1.1 101 Switching Protocols`. (Checked against the real `/ws/auctions/{id}` route with a local production stack, including a `wss://` client receiving a live update.)
    - `docker compose ps` shows every service healthy, and `backup` has written its first dump.
 
    ```bash

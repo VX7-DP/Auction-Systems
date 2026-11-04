@@ -1,6 +1,6 @@
 # CLAUDE.md — Distributed Auction System
 
-Single source of truth for the auction project, revised 4 Nov 2026. It replaces the old .NET/Azure plan; if an older doc (`decisions.md`, `auction-roadmap.md`, `auction-checklist.md`) disagrees with it, **this file wins**.
+Single source of truth for the auction project, revised 4 Nov 2026 (Stage 1 done the same day). It replaces the old .NET/Azure plan; if an older doc (`decisions.md`, `auction-roadmap.md`, `auction-checklist.md`) disagrees with it, **this file wins**.
 
 ## Git rules
 
@@ -101,7 +101,7 @@ In priority order:
 
 Each stage ends on a done-signal, not a date. Targets assume solo work runs 1.5–2x estimates.
 
-1. **Core loop, local (target 4 Nov).** Items 1–3 from section 6, running in Docker Compose. Done when two browsers and the simulated bidders bid on one auction, outbid notices fire, and the auction closes on time. A Redis restart mid-auction must lose no confirmed bid and keep the right high bid.
+1. **Core loop, local (target 4 Nov; done 4 Nov).** Items 1–3 from section 6, running in Docker Compose. Done when two browsers and the simulated bidders bid on one auction, outbid notices fire, and the auction closes on time. A Redis restart mid-auction must lose no confirmed bid and keep the right high bid. `backend/tests/e2e` checks this against the Compose stack, and CI runs it on every push.
 2. **Live (target 5 Nov).** Items 4–5: sign-in, admin page and deployment at `auction.summittech.in` over HTTPS. Needs the host decision in section 8. Done when a stranger on a phone opens the link, signs in and bids.
 3. **Proof.** Items 6–7: load test, results page, public metrics, readme and case study. Done when the case study is published with real load-test numbers.
 
@@ -181,7 +181,7 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 - Pub/Sub channel `auction:{id}:events`, carrying the WebSocket messages above as JSON.
 - Locks `lock:job:{name}`.
 
-**Code interfaces (session 0 creates the stubs):**
+**Code interfaces:**
 
 - `app.bidding.service.place_bid(auction_id, bid_id, bidder_id, bidder_name, amount, is_bot=False) -> BidResult`, used by the bids endpoint and the simulated bidders.
 - `app.auth.current_bidder` and `app.auth.require_admin`, both FastAPI dependencies.
@@ -221,23 +221,25 @@ Defaults are in effect unless the owner changes them.
 
 ## 14. Timeline
 
-- Stage 1 target 4 Nov 2026, Stage 2 target 5 Nov 2026, then harden.
+- Stage 1 target 4 Nov 2026, done 4 Nov 2026. Stage 2 target 5 Nov 2026 (needs the host decision in section 8), then harden.
 
 ## 15. Claude Code sessions
 
 Run session 0 alone, then sessions 1–4 in parallel, then 5, then 6. Each session starts from `main` after the earlier PRs are merged. Every session follows the Git rules, works test-first, treats section 10 as fixed and stays inside the paths it owns.
 
+PR numbers in the Status column are in VX7-DP/Auction-Systems. Since session 5, background jobs share one lock module (`backend/app/job_lock.py`).
+
 Shared files belong to session 0: `backend/app/main.py`, `backend/app/config.py`, `backend/app/auth.py`, `backend/pyproject.toml`, `backend/uv.lock`, `backend/tests/conftest.py`, `docker-compose.yml` and `.github/`. A later session that must change one says so in its PR. In cloud sessions, PostgreSQL 16 and Redis 7 are installed but stopped (`service postgresql start`, `service redis-server start`), and Docker Compose is available.
 
-| Session | Branch | Owns | Task | Done when |
-| --- | --- | --- | --- | --- |
-| 0. Scaffold | `chore/project-scaffold` | The layout and the shared files | Layout: `backend/` (app in `backend/app/`, tests in `backend/tests/`), `frontend/`, `deploy/`, `loadtest/`, `docs/`. FastAPI app with one stub router per module and the section 10 code interfaces, settings from env, guest sign-in and admin check, SQLAlchemy models and the first Alembic migration, every expected backend dependency managed with uv, a Vite + React + TypeScript skeleton, `docker-compose.yml` with postgres, redis, backend and frontend, and GitHub Actions for lint and tests. | `docker compose up` starts everything, `GET /api/health` reports Postgres and Redis up, and CI is green. |
-| 1. Bid engine | `feat/bid-engine` | `backend/app/bidding/`, `backend/app/admin/`, `backend/tests/bidding/` | Lua CAS, sync dual-write, pause on a failed insert, reload on `NOT_LOADED`, idempotent `bid_id`, publish after commit, close script and sweeper behind the job lock, `POST /api/auctions/{id}/bids` and `POST /api/admin/auctions`. | Tests pass for concurrent ordering, a Redis restart, an idempotent retry and closing at the deadline. |
-| 2. Real-time and demo mode | `feat/realtime-demo-mode` | `backend/app/realtime/`, `backend/app/auctions/`, `backend/app/demo/`, `backend/tests/realtime/` | `/ws/auctions/{id}`, one Pub/Sub listener per instance, `GET /api/auctions`, `GET /api/auctions/{id}`, and labeled simulated bidders behind the job lock that call `place_bid`. | Two WebSocket clients see the same updates in `seq` order, and a client that misses one resyncs from the snapshot. |
-| 3. Front end | `feat/frontend-ui` | `frontend/` | Auction list, auction page (countdown from the server's `end_at`, bid box, history, outbid notice, bot labels), sign-in, admin form, and reconnect plus resync on `seq` gaps. Mock the contract until the backend lands. | Every screen works against the mocked contract, and the build and tests pass. |
-| 4. Deploy prep | `chore/vm-deploy` | `deploy/`, `docs/deploy.md` | For the one-VM option in section 8: production Compose override, Caddy serving the front end and proxying `/api` and `/ws` with HTTPS on `auction.summittech.in`, `.env.example`, a nightly Postgres backup, and a runbook for first deploy, redeploy and restore. | The production stack starts locally with Caddy's internal certificate, and a WebSocket upgrade works through it. |
-| 5. Integration | `feat/stage1-integration` | Wiring across modules | Connect the merged pieces and add an end-to-end test of the Stage 1 done-signal, with two WebSocket clients standing in for browsers. | The Stage 1 done-signal passes in Compose. |
-| 6. Proof prep | `feat/load-test-metrics` | `loadtest/`, `backend/app/metrics/`, `README.md`, `docs/case-study.md` | Load test with HTTP bids and WebSocket viewers (the tool choice opens with tradeoffs), app-level metrics counters, and a README plus case-study skeleton in business terms. | The load test runs against Compose and writes a results file. |
+| Session | Branch | Owns | Task | Done when | Status |
+| --- | --- | --- | --- | --- | --- |
+| 0. Scaffold | `chore/project-scaffold` | The layout and the shared files | Layout: `backend/` (app in `backend/app/`, tests in `backend/tests/`), `frontend/`, `deploy/`, `loadtest/`, `docs/`. FastAPI app with one stub router per module and the section 10 code interfaces, settings from env, guest sign-in and admin check, SQLAlchemy models and the first Alembic migration, every expected backend dependency managed with uv, a Vite + React + TypeScript skeleton, `docker-compose.yml` with postgres, redis, backend and frontend, and GitHub Actions for lint and tests. | `docker compose up` starts everything, `GET /api/health` reports Postgres and Redis up, and CI is green. | Done: #2, fixes in #4 and #9 |
+| 1. Bid engine | `feat/bid-engine` | `backend/app/bidding/`, `backend/app/admin/`, `backend/tests/bidding/` | Lua CAS, sync dual-write, pause on a failed insert, reload on `NOT_LOADED`, idempotent `bid_id`, publish after commit, close script and sweeper behind the job lock, `POST /api/auctions/{id}/bids` and `POST /api/admin/auctions`. | Tests pass for concurrent ordering, a Redis restart, an idempotent retry and closing at the deadline. | Done: #6; seq ceiling in #11 |
+| 2. Real-time and demo mode | `feat/realtime-demo-mode` | `backend/app/realtime/`, `backend/app/auctions/`, `backend/app/demo/`, `backend/tests/realtime/` | `/ws/auctions/{id}`, one Pub/Sub listener per instance, `GET /api/auctions`, `GET /api/auctions/{id}`, and labeled simulated bidders behind the job lock that call `place_bid`. | Two WebSocket clients see the same updates in `seq` order, and a client that misses one resyncs from the snapshot. | Done: #8; shared job lock in #13 |
+| 3. Front end | `feat/frontend-ui` | `frontend/` | Auction list, auction page (countdown from the server's `end_at`, bid box, history, outbid notice, bot labels), sign-in, admin form, and reconnect plus resync on `seq` gaps. Mock the contract until the backend lands. | Every screen works against the mocked contract, and the build and tests pass. | Done: #5 |
+| 4. Deploy prep | `chore/vm-deploy` | `deploy/`, `docs/deploy.md` | For the one-VM option in section 8: production Compose override, Caddy serving the front end and proxying `/api` and `/ws` with HTTPS on `auction.summittech.in`, `.env.example`, a nightly Postgres backup, and a runbook for first deploy, redeploy and restore. | The production stack starts locally with Caddy's internal certificate, and a WebSocket upgrade works through it. | Done: #7 |
+| 5. Integration | `feat/stage1-integration` | Wiring across modules | Connect the merged pieces and add an end-to-end test of the Stage 1 done-signal, with two WebSocket clients standing in for browsers. | The Stage 1 done-signal passes in Compose. | Done: #10, with #11, #12 and #13 |
+| 6. Proof prep | `feat/load-test-metrics` | `loadtest/`, `backend/app/metrics/`, `README.md`, `docs/case-study.md` | Load test with HTTP bids and WebSocket viewers (the tool choice opens with tradeoffs), app-level metrics counters, and a README plus case-study skeleton in business terms. | The load test runs against Compose and writes a results file. | Next |
 
 ## Sources (checked 4 Nov 2026)
 
