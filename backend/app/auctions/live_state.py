@@ -1,7 +1,7 @@
 """Reads an auction's live state from its Redis hash (CLAUDE.md section 10).
 
-The bid engine writes ``auction:{id}``. Section 10 names its fields but not their
-encodings, so this reader assumes the simplest ones and tolerates the obvious variants:
+The bid engine writes ``auction:{id}`` with the encodings section 10 pins. This reader
+also tolerates the obvious variants:
 
 - ``status``: ``open``, ``paused`` or ``closed``.
 - ``end_at_ms``, ``start_price``, ``seq``, ``high_amount``: base-10 integers;

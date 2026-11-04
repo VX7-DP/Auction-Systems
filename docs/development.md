@@ -51,6 +51,19 @@ uv run alembic revision --autogenerate -m "what changed"
   - The shared fixtures are in `tests/conftest.py`: `app`, `client`, `client_factory`, `bidder_client`, `admin_headers`, `db_session`, `redis` and `make_settings`.
   - Background jobs are off in tests. To turn them on for one test module, override the `settings` fixture there.
 
+### End-to-end test
+
+`tests/e2e/` checks the Stage 1 done-signal against a running stack. Two guests, each with the auction page open over a WebSocket, bid alongside the simulated bidders. The test restarts Redis mid-auction, then waits for the close. CI runs it in the `compose` job. Locally:
+
+```bash
+docker compose up -d --build --wait
+cd backend && E2E_BASE_URL=http://localhost:5173 uv run pytest tests/e2e -v
+```
+
+- It takes about a minute, because the auction has to reach its end time.
+- Without `E2E_BASE_URL` it is skipped, so plain `uv run pytest` doesn't need the stack.
+- It reads the stack's Postgres to check what was saved (`E2E_DATABASE_URL`, default the Compose one) and restarts Redis with `docker compose restart redis` (override with `E2E_RESTART_REDIS`). Point it only at a local or CI stack.
+
 ## Front end (`frontend/`)
 
 ```bash
