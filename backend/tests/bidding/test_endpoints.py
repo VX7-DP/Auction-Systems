@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
+from app.bidding.settings import get_bidding_settings
 from app.contract import AuctionSnapshot
 from tests.bidding.helpers import HeldInsert, Stores, to_ms
 
@@ -133,6 +134,8 @@ async def test_admin_creates_an_open_auction_loaded_into_redis(
         "end_at_ms": str(to_ms(end_at)),
         "seq": "0",
         "epoch": str(row["load_epoch"]),
+        # The first block of seqs, reserved in Postgres before Redis can use it.
+        "ceiling": str(get_bidding_settings().seq_block),
     }
 
 

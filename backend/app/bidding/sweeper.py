@@ -11,7 +11,7 @@ import uuid
 
 from app.bidding import scripts, store
 from app.bidding.events import publish
-from app.bidding.loader import reload_auction
+from app.bidding.loader import reload_auction, reserve_seqs
 from app.bidding.settings import BiddingSettings
 from app.contract import AuctionClosed, auction_key
 from app.job_lock import JobLock
@@ -47,6 +47,9 @@ async def close_auction(auction_id: uuid.UUID) -> None:
         if result[0] == "NOT_LOADED":
             if await reload_auction(auction_id) == "not_found":
                 return
+            continue
+        if result[0] == "RESERVE":
+            await reserve_seqs(auction_id, int(result[1]), int(result[2]))
             continue
         if result[0] != "CLOSED":  # not due yet, or paused until it is reloaded
             return

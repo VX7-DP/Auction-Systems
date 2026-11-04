@@ -20,6 +20,9 @@ class BiddingSettings(BaseSettings):
     reload_timeout_ms: int = Field(default=5000, gt=0)
     # How long a reload may hold its Redis lock before another instance may take over.
     reload_lock_ttl_ms: int = Field(default=10000, gt=0)
+    # Seqs reserved in Postgres at a time (auctions.seq_ceiling). One reservation per
+    # this many state changes; it is also the jump in seq after Redis loses an auction.
+    seq_block: int = Field(default=1000, ge=2)
     # Close sweeper period, and the TTL of its job lock (renewed every period).
     sweep_interval_ms: int = Field(default=1000, gt=0)
     job_lock_ttl_ms: int = Field(default=10000, gt=0)

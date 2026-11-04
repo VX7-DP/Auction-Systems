@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 
+from app.bidding.settings import get_bidding_settings
 from app.contract import AuctionSnapshot
 from tests.bidding.helpers import Stores, accepted, assert_high_bid, bid, new_bidder
 
@@ -77,4 +78,6 @@ async def test_retried_bid_id_returns_the_original_result_after_a_redis_restart(
 
     assert retry == accepted(bid_id, 1)
     assert [row["seq"] for row in await stores.bids(auction.id)] == [1, 2]
-    await assert_high_bid(stores, auction.id, amount=200, bidder=ben, seq=2)
+    # Redis lost the auction, so its seqs resume at the first load's ceiling.
+    block = get_bidding_settings().seq_block
+    await assert_high_bid(stores, auction.id, amount=200, bidder=ben, seq=2, redis_seq=block)

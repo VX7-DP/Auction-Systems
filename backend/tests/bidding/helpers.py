@@ -100,9 +100,19 @@ class Stores:
 
 
 async def assert_high_bid(
-    stores: Stores, auction_id: uuid.UUID, *, amount: int, bidder: Bidder, seq: int
+    stores: Stores,
+    auction_id: uuid.UUID,
+    *,
+    amount: int,
+    bidder: Bidder,
+    seq: int,
+    redis_seq: int | None = None,
 ) -> None:
-    """Postgres and Redis agree on the high bid, the seq and the load epoch."""
+    """Postgres and Redis agree on the high bid, the seq and the load epoch.
+
+    ``redis_seq`` is Redis's seq when it differs from the high bid's: after Redis lost
+    the auction, seqs resume at the reserved ceiling (app.bidding.store).
+    Redis never holds a seq above its ceiling, nor a ceiling Postgres hasn't reserved."""
     row = await stores.auction(auction_id)
     assert (
         row["high_amount"],
@@ -119,9 +129,10 @@ async def assert_high_bid(
         "high_bidder_id": str(bidder.id),
         "high_bidder_name": bidder.name,
         "high_is_bot": "1" if bidder.is_bot else "0",
-        "seq": str(seq),
+        "seq": str(seq if redis_seq is None else redis_seq),
     }
     assert redis_hash.get("epoch") == str(row["load_epoch"])
+    assert int(redis_hash["seq"]) <= int(redis_hash["ceiling"]) <= row["seq_ceiling"]
 
 
 # --- Time: Redis TIME is the one clock ----------------------------------------------------

@@ -25,8 +25,8 @@ The same engine fits any "many people, one hot item, live updates" problem: flas
 | Area | State |
 | --- | --- |
 | Project scaffold, health check, guest sign-in, admin check | Done |
-| Bid engine, real-time updates, demo bidders, front end | In progress |
-| Deployment to `auction.summittech.in` | In progress (not live yet) |
+| Bid engine, real-time updates, demo bidders, front end | Done. CI runs an end-to-end test on the full stack: two bidders and the simulated bidders, a Redis restart mid-auction, then the close |
+| Deployment to `auction.summittech.in` | Production setup ready ([docs/deploy.md](docs/deploy.md)); not live yet |
 | Load tests, public metrics, case study | Planned |
 
 ## Run it locally

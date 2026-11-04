@@ -11,7 +11,7 @@ from uuid import UUID
 
 from app.bidding import scripts, store
 from app.bidding.events import publish, publish_current_state
-from app.bidding.loader import reload_auction
+from app.bidding.loader import reload_auction, reserve_seqs
 from app.bidding.settings import get_bidding_settings
 from app.contract import AuctionUpdate, BidResult, auction_key
 from app.resources import get_resources
@@ -61,6 +61,9 @@ async def _place_bid(
             continue
         if kind == "REJECTED":
             return BidResult(bid_id=bid_id, status="rejected", reason=decision[1])
+        if kind == "RESERVE":
+            await reserve_seqs(auction_id, int(decision[1]), int(decision[2]))
+            continue
 
         epoch = int(decision[1])
         if kind == "REPEAT":

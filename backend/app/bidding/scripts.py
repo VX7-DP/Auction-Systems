@@ -5,6 +5,9 @@ never interleave with another bid. Redis TIME is the one clock for deadlines.
 
 Numbers cross the Lua boundary as decimal strings: Lua numbers are doubles, exact up
 to 2**53 (MAX_AMOUNT), but tostring() would print them with only 14 digits.
+
+No script takes a seq above the hash's ``ceiling``, which Postgres reserved first (see
+app.bidding.store). DECIDE keeps one seq spare, so a pause never runs out of room.
 """
 
 import hashlib
@@ -47,7 +50,8 @@ local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
 # KEYS: auction hash, bid memory.
 # ARGV: bid_id, bidder_id, bidder_name, amount, is_bot ("1" or "0").
-# Returns {"NOT_LOADED"}, {"REJECTED", reason}, {"REPEAT", epoch, remembered record}
+# Returns {"NOT_LOADED"}, {"REJECTED", reason}, {"REPEAT", epoch, remembered record},
+# {"RESERVE", epoch, seq} (reserve more seqs, then decide again)
 # or {"ACCEPTED", epoch, seq, end_at_ms}.
 DECIDE = LuaScript(
     """
@@ -61,7 +65,7 @@ if seen then
   return {'REPEAT', epoch, seen}
 end
 local state = redis.call('HMGET', KEYS[1],
-  'status', 'end_at_ms', 'start_price', 'high_amount', 'seq')
+  'status', 'end_at_ms', 'start_price', 'high_amount', 'seq', 'ceiling')
 if state[1] == 'closed' then
   return {'REJECTED', 'closed'}
 end
@@ -81,6 +85,9 @@ end
 if tonumber(ARGV[4]) <= tonumber(floor) then
   return {'REJECTED', 'too_low'}
 end
+if tonumber(state[5]) + 2 > tonumber(state[6] or '0') then
+  return {'RESERVE', epoch, state[5]}
+end
 local seq = string.format('%d', tonumber(state[5]) + 1)
 redis.call('HSET', KEYS[1], 'seq', seq, 'high_amount', ARGV[4], 'high_bidder_id', ARGV[2],
   'high_bidder_name', ARGV[3], 'high_is_bot', ARGV[5])
@@ -92,9 +99,11 @@ return {'ACCEPTED', epoch, seq, state[2]}
 
 # KEYS: auction hash, bid memory, paused set.
 # ARGV: auction_id, epoch, status, end_at_ms, start_price, seq, high_amount ("" if none),
-#       high_bidder_id, high_bidder_name, high_is_bot, then bid_id and record pairs.
+#       high_bidder_id, high_bidder_name, high_is_bot, resume_seq, ceiling,
+#       then bid_id and record pairs.
 # Replaces the auction's Redis state unless Redis already holds a load at least as new.
-# seq never goes backwards, and a paused auction reopens with one more seq.
+# seq never goes backwards: if Redis lost the auction, it resumes at resume_seq, above
+# every seq Redis could have shown. A paused auction reopens with one more seq.
 # Returns {"STALE"} or {"LOADED", seq, reopened ("1" or "0")}.
 LOAD = LuaScript(
     """
@@ -103,8 +112,9 @@ if current[1] and tonumber(current[1]) >= tonumber(ARGV[2]) then
   return {'STALE'}
 end
 local seq = tonumber(ARGV[6])
-if current[2] and tonumber(current[2]) > seq then
-  seq = tonumber(current[2])
+local held = current[2] or ARGV[11]
+if tonumber(held) > seq then
+  seq = tonumber(held)
 end
 local reopened = '0'
 if current[3] == 'paused' and ARGV[3] == 'open' then
@@ -114,12 +124,12 @@ end
 seq = string.format('%d', seq)
 redis.call('DEL', KEYS[1], KEYS[2])
 redis.call('HSET', KEYS[1], 'status', ARGV[3], 'end_at_ms', ARGV[4], 'start_price', ARGV[5],
-  'seq', seq, 'epoch', ARGV[2])
+  'seq', seq, 'epoch', ARGV[2], 'ceiling', ARGV[12])
 if ARGV[7] ~= '' then
   redis.call('HSET', KEYS[1], 'high_amount', ARGV[7], 'high_bidder_id', ARGV[8],
     'high_bidder_name', ARGV[9], 'high_is_bot', ARGV[10])
 end
-for i = 11, #ARGV, 2 do
+for i = 13, #ARGV, 2 do
   redis.call('HSET', KEYS[2], ARGV[i], ARGV[i + 1])
 end
 redis.call('SREM', KEYS[3], ARGV[1])
@@ -132,9 +142,12 @@ return {'LOADED', seq, reopened}
 # Returns {"UNCHANGED"} or {"PAUSED", seq}.
 PAUSE = LuaScript(
     """
-local state = redis.call('HMGET', KEYS[1], 'epoch', 'status', 'seq')
+local state = redis.call('HMGET', KEYS[1], 'epoch', 'status', 'seq', 'ceiling')
 if state[1] ~= ARGV[1] or state[2] ~= 'open' then
   return {'UNCHANGED'}
+end
+if tonumber(state[3]) + 1 > tonumber(state[4] or '0') then
+  return {'UNCHANGED'}  -- unreachable while DECIDE keeps a seq spare
 end
 local seq = string.format('%d', tonumber(state[3]) + 1)
 redis.call('HSET', KEYS[1], 'status', 'paused', 'seq', seq)
@@ -144,11 +157,12 @@ return {'PAUSED', seq}
 )
 
 # KEYS: auction hash. Closes the auction if it is open and Redis TIME has reached end_at.
-# Returns {"NOT_LOADED"}, {"PAUSED"}, {"NOT_DUE"} or {"CLOSED", seq, epoch}; an auction
-# closed earlier returns its closing seq again.
+# Returns {"NOT_LOADED"}, {"PAUSED"}, {"NOT_DUE"}, {"RESERVE", epoch, seq} (reserve more
+# seqs, then close again) or {"CLOSED", seq, epoch}; an auction closed earlier returns its
+# closing seq again.
 CLOSE = LuaScript(
     """
-local state = redis.call('HMGET', KEYS[1], 'status', 'end_at_ms', 'seq', 'epoch')
+local state = redis.call('HMGET', KEYS[1], 'status', 'end_at_ms', 'seq', 'epoch', 'ceiling')
 if not state[1] then
   return {'NOT_LOADED'}
 end
@@ -164,9 +178,26 @@ end
 if now_ms < tonumber(state[2]) then
   return {'NOT_DUE'}
 end
+if tonumber(state[3]) + 1 > tonumber(state[5] or '0') then
+  return {'RESERVE', state[4], state[3]}
+end
 local seq = string.format('%d', tonumber(state[3]) + 1)
 redis.call('HSET', KEYS[1], 'status', 'closed', 'seq', seq)
 return {'CLOSED', seq, state[4]}
+"""
+)
+
+# KEYS: auction hash. ARGV: epoch, ceiling. Raises the seq ceiling to one Postgres has
+# reserved, unless the auction has been reloaded since. Returns 1 if it applied.
+RAISE_CEILING = LuaScript(
+    """
+if redis.call('HGET', KEYS[1], 'epoch') ~= ARGV[1] then
+  return 0
+end
+if tonumber(ARGV[2]) > tonumber(redis.call('HGET', KEYS[1], 'ceiling') or '0') then
+  redis.call('HSET', KEYS[1], 'ceiling', ARGV[2])
+end
+return 1
 """
 )
 

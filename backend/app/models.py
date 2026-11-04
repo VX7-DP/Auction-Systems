@@ -57,6 +57,9 @@ class Auction(Base):
     # Bumped each time the auction is loaded into Redis. A bid write commits only if
     # the epoch it was decided under is still current (CLAUDE.md section 4).
     load_epoch: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # The highest seq Redis may hand out, reserved here before Redis can use it. After
+    # Redis loses the auction, seqs resume above it, so no seq viewers saw is reused.
+    seq_ceiling: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
 
 
 class Bid(Base):
