@@ -5,7 +5,7 @@ Tests run against a real Postgres and Redis:
   migrations once per run, and emptied before each test that uses it.
 - Redis logical database 15: flushed before each test that uses it.
 
-The defaults match ``docker compose up -d postgres redis`` and the CI service
+The defaults match ``docker compose up -d --wait postgres redis`` and the CI service
 containers. Point the tests elsewhere with TEST_DATABASE_URL and TEST_REDIS_URL.
 
 To change settings for one test module, override the ``settings`` fixture there:
@@ -32,12 +32,15 @@ from redis.asyncio import Redis
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
-from app.config import Settings
+from app.config import Settings, async_database_url
 from app.main import create_app
 from app.models import Base
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://auction:auction@localhost:5432/auction_test"
+# Normalised like DATABASE_URL, so a plain postgresql:// URL works here too.
+TEST_DATABASE_URL = async_database_url(
+    os.environ.get(
+        "TEST_DATABASE_URL", "postgresql+asyncpg://auction:auction@localhost:5432/auction_test"
+    )
 )
 TEST_REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 ADMIN_PASSWORD = "test-admin-password"

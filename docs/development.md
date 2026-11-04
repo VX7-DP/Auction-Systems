@@ -23,7 +23,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run pytest
 ```
 
-The tests need Postgres and Redis on localhost. One way is `docker compose up -d postgres redis`. They use the database `auction_test` (created automatically) and Redis database 15. To point them elsewhere, set `TEST_DATABASE_URL` and `TEST_REDIS_URL`.
+The tests need Postgres and Redis on localhost. One way is `docker compose up -d --wait postgres redis` (`--wait` holds until both are ready; without it the first test run can fail to connect). They use the database `auction_test` (created automatically) and Redis database 15. To point them elsewhere, set `TEST_DATABASE_URL` and `TEST_REDIS_URL`. The tests drop and rebuild the test database's schema, so its name must end in `_test`; any other name is refused.
 
 To run the API on the host, set `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, `ADMIN_PASSWORD` and `COOKIE_SECURE=false`, either in the environment or in `backend/.env`. Then run:
 

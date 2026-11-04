@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from app.config import Settings
 
@@ -28,6 +29,8 @@ class Resources:
     db_sessionmaker: async_sessionmaker[AsyncSession]
     # decode_responses=True: commands return str, not bytes.
     redis: Redis
+    # Unpooled, for the health check: a pool busy with bids must not read as Postgres down.
+    health_db_engine: AsyncEngine
 
 
 _current: Resources | None = None
@@ -41,11 +44,13 @@ async def open_resources(settings: Settings) -> AsyncIterator[Resources]:
         raise RuntimeError("Resources are already open in this process.")
     db_engine = create_async_engine(settings.database_url)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    health_db_engine = create_async_engine(settings.database_url, poolclass=NullPool)
     _current = Resources(
         settings=settings,
         db_engine=db_engine,
         db_sessionmaker=async_sessionmaker(db_engine, expire_on_commit=False),
         redis=redis,
+        health_db_engine=health_db_engine,
     )
     try:
         yield _current
@@ -53,6 +58,7 @@ async def open_resources(settings: Settings) -> AsyncIterator[Resources]:
         _current = None
         await redis.aclose()
         await db_engine.dispose()
+        await health_db_engine.dispose()
 
 
 def get_resources() -> Resources:
@@ -71,6 +77,10 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
 
 def get_db_engine() -> AsyncEngine:
     return get_resources().db_engine
+
+
+def get_health_db_engine() -> AsyncEngine:
+    return get_resources().health_db_engine
 
 
 def get_redis() -> Redis:

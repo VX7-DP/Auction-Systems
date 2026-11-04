@@ -10,9 +10,11 @@ const apiTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:8000'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Keys starting with ^ are regexes. Plain keys are prefix matches, so '/api' would
+    // also grab front-end paths such as /apiary.
     proxy: {
-      '/api': apiTarget,
-      '/ws': { target: apiTarget, ws: true },
+      '^/api/': apiTarget,
+      '^/ws/': { target: apiTarget, ws: true },
     },
   },
   test: {

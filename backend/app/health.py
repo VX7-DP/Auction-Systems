@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.contract import Health
-from app.resources import get_db_engine, get_redis
+from app.resources import get_health_db_engine, get_redis
 
 CHECK_TIMEOUT_SECONDS = 2.0
 
@@ -41,7 +41,7 @@ def _state(up: bool) -> Literal["up", "down"]:
 @router.get("/health", responses={503: {"model": Health}})
 async def health(
     response: Response,
-    engine: Annotated[AsyncEngine, Depends(get_db_engine)],
+    engine: Annotated[AsyncEngine, Depends(get_health_db_engine)],
     redis: Annotated[Redis, Depends(get_redis)],
 ) -> Health:
     postgres_up, redis_up = await asyncio.gather(_postgres_up(engine), _redis_up(redis))
