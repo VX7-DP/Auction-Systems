@@ -153,7 +153,7 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 - `GET /api/session` → `{bidder_id, display_name}`, or 401.
 - `GET /api/auctions` → `[{id, title, status, high_amount, end_at}]`.
 - `GET /api/auctions/{id}` → snapshot: `{id, title, start_price, end_at, status, seq, high_amount, high_bidder_id, high_bidder_name, high_is_bot, recent_bids: [{seq, amount, bidder_name, is_bot, created_at}]}`.
-- `POST /api/auctions/{id}/bids {bid_id, amount}` → `{bid_id, status: accepted | rejected | error, reason?, seq?}`, where `reason` is `too_low`, `closed`, `paused` or `not_found`.
+- `POST /api/auctions/{id}/bids {bid_id, amount}` → `{bid_id, status: accepted | rejected | error, reason?, seq?}`, where `reason` is `too_low`, `closed`, `paused`, `not_found` or `duplicate_bid_id` (the `bid_id` was already used on another auction; make a new one).
 - `POST /api/admin/auctions {title, start_price, end_at}` with an `X-Admin-Password` header → the new auction.
 - `GET /api/health` → Postgres and Redis status.
 

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Bounds the reload-and-decide-again loop when reloads keep racing this bid.
 MAX_DECISIONS = 10
 
-SaveOutcome = Literal["saved", "fenced", "failed"]
+SaveOutcome = Literal["saved", "fenced", "conflict", "failed"]
 
 
 async def place_bid(
@@ -96,6 +96,11 @@ async def _place_bid(
             if loaded_epoch is None or int(loaded_epoch) <= epoch:
                 await reload_auction(auction_id)
             continue
+        if outcome == "conflict":
+            # The bid_id belongs to a bid on another auction. Postgres is fine, so don't
+            # pause: reload, which drops this decision from Redis, and refuse the bid.
+            await reload_auction(auction_id)
+            return BidResult(bid_id=bid_id, status="rejected", reason="duplicate_bid_id")
         # Redis accepted a bid that Postgres won't take: stop building on it.
         await _pause(auction_id, epoch)
         return BidResult(bid_id=bid_id, status="error")
@@ -118,6 +123,8 @@ async def _save(auction_id: UUID, epoch: int, bid: store.BidRecord) -> SaveOutco
             return "saved"
         except store.Fenced:
             return "fenced"
+        except store.BidConflict:
+            return "conflict"
         except Exception as error:
             logger.warning(
                 "Saving bid %s (attempt %s of %s) failed: %r",

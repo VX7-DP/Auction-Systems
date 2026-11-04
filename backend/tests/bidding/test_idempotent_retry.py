@@ -3,10 +3,20 @@
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 
 from app.bidding.settings import get_bidding_settings
 from app.contract import AuctionSnapshot
-from tests.bidding.helpers import Stores, accepted, assert_high_bid, bid, new_bidder
+from tests.bidding.helpers import (
+    EventReader,
+    Stores,
+    accepted,
+    assert_high_bid,
+    bid,
+    new_bidder,
+)
+
+Listen = Callable[[uuid.UUID], AbstractAsyncContextManager[EventReader]]
 
 
 async def test_retried_bid_id_returns_the_original_result(
@@ -81,3 +91,28 @@ async def test_retried_bid_id_returns_the_original_result_after_a_redis_restart(
     # Redis lost the auction, so its seqs resume at the first load's ceiling.
     block = get_bidding_settings().seq_block
     await assert_high_bid(stores, auction.id, amount=200, bidder=ben, seq=2, redis_seq=block)
+
+
+async def test_a_bid_id_from_another_auction_does_not_pause_or_show_on_this_one(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    stores: Stores,
+    listen: Listen,
+) -> None:
+    """bid_id is unique across all auctions. Sending one already used on auction A to
+    auction B must not pause B, nor show the bid that Postgres refused as B's high."""
+    first_auction = await create_auction(start_price=100)
+    other_auction = await create_auction(start_price=100)
+    asha, ben = new_bidder("Asha"), new_bidder("Ben")
+    bid_id = uuid.uuid4()
+    assert await bid(first_auction.id, asha, 150, bid_id=bid_id) == accepted(bid_id, 1)
+
+    async with listen(other_auction.id) as events:
+        reused = await bid(other_auction.id, ben, 150, bid_id=bid_id)
+        published = await events.drain(wait=0.5)
+
+    assert reused.status != "accepted"
+    assert await stores.bids(other_auction.id) == []
+    redis_hash = await stores.hash(other_auction.id)
+    assert redis_hash["status"] == "open"
+    assert "high_amount" not in redis_hash
+    assert [event for event in published if getattr(event, "high_amount", None) == 150] == []
