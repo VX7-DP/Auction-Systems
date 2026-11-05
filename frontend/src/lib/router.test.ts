@@ -11,6 +11,7 @@ describe('matchRoute', () => {
     ['/nope', { name: 'not-found' }],
     ['/auctions/', { name: 'not-found' }],
     ['/auctions/a/b', { name: 'not-found' }],
+    ['/auctions/%E0%A4%A', { name: 'not-found' }], // a broken %-escape
   ])('%s', (path, expected) => {
     expect(matchRoute(path)).toEqual(expected)
   })
