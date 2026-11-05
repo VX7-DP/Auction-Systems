@@ -26,6 +26,9 @@ class BiddingSettings(BaseSettings):
     # Close sweeper period, and the TTL of its job lock (renewed every period).
     sweep_interval_ms: int = Field(default=1000, gt=0)
     job_lock_ttl_ms: int = Field(default=10000, gt=0)
+    # How long Redis remembers which auction accepted a bid_id, so a bid_id reused on
+    # another auction is refused at once (section 10 of the design doc, bid:{bid_id}).
+    bid_owner_ttl_s: int = Field(default=86400, gt=0)
 
 
 _current: BiddingSettings | None = None

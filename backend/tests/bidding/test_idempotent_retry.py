@@ -5,6 +5,9 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 
+import pytest
+
+from app.bidding import store
 from app.bidding.settings import get_bidding_settings
 from app.contract import AuctionSnapshot
 from tests.bidding.helpers import (
@@ -14,6 +17,8 @@ from tests.bidding.helpers import (
     assert_high_bid,
     bid,
     new_bidder,
+    poll_until,
+    rejected,
 )
 
 Listen = Callable[[uuid.UUID], AbstractAsyncContextManager[EventReader]]
@@ -116,3 +121,44 @@ async def test_a_bid_id_from_another_auction_does_not_pause_or_show_on_this_one(
     assert redis_hash["status"] == "open"
     assert "high_amount" not in redis_hash
     assert [event for event in published if getattr(event, "high_amount", None) == 150] == []
+
+
+async def test_a_bid_id_reused_on_another_auction_never_blocks_its_bids(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    stores: Stores,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mallory reuses her bid_id from auction A on auction B, with a huge amount. Postgres
+    will refuse it, so it must never stand in the way of an honest bid on B, not even
+    for the moment before that refusal."""
+    first_auction = await create_auction(start_price=100)
+    other_auction = await create_auction(start_price=100)
+    mallory, ben = new_bidder("Mallory"), new_bidder("Ben")
+    reused_id = uuid.uuid4()
+    assert await bid(first_auction.id, mallory, 150, bid_id=reused_id) == accepted(reused_id, 1)
+
+    release = asyncio.Event()
+    real_save_bid = store.save_bid
+
+    async def save_bid_after_release(*args: object, **kwargs: object) -> None:
+        if args[1] == other_auction.id and args[3].bid_id == reused_id:  # type: ignore[attr-defined]
+            await release.wait()
+        await real_save_bid(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store, "save_bid", save_bid_after_release)
+
+    huge = 10**12
+    reuse = asyncio.create_task(bid(other_auction.id, mallory, huge, bid_id=reused_id))
+
+    async def refused_or_decided() -> bool:
+        return reuse.done() or (await stores.hash(other_auction.id)).get("high_amount") == str(huge)
+
+    await poll_until(refused_or_decided, what="the reused bid_id to be decided or refused")
+    honest = await bid(other_auction.id, ben, 200)
+    release.set()
+    reused = await reuse
+
+    assert (honest.status, honest.reason) == ("accepted", None)
+    assert reused == rejected(reused_id, "duplicate_bid_id")
+    assert honest.seq is not None
+    await assert_high_bid(stores, other_auction.id, amount=200, bidder=ben, seq=honest.seq)

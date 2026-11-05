@@ -28,6 +28,11 @@ def bid_memory_key(auction_id: UUID) -> str:
     return f"auction:{auction_id}:bids"
 
 
+def bid_owner_key(bid_id: UUID) -> str:
+    """The id of the auction that accepted this bid_id (section 10)."""
+    return f"bid:{bid_id}"
+
+
 def reload_lock_key(auction_id: UUID) -> str:
     return f"lock:reload:{auction_id}"
 
@@ -51,8 +56,11 @@ local now = redis.call('TIME')
 local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 """
 
-# KEYS: auction hash, bid memory.
-# ARGV: bid_id, bidder_id, bidder_name, amount, is_bot ("1" or "0").
+# KEYS: auction hash, bid memory, bid owner.
+# ARGV: bid_id, bidder_id, bidder_name, amount, is_bot ("1" or "0"), auction_id,
+#       bid owner TTL in seconds.
+# A bid_id another auction accepted is refused before it changes anything: Postgres
+# would refuse it anyway, and until then it would block every honest bid here.
 # Returns {"NOT_LOADED"}, {"REJECTED", reason}, {"REPEAT", epoch, remembered record},
 # {"RESERVE", epoch, seq} (reserve more seqs, then decide again)
 # or {"ACCEPTED", epoch, seq, end_at_ms}.
@@ -66,6 +74,10 @@ local epoch = redis.call('HGET', KEYS[1], 'epoch')
 local seen = redis.call('HGET', KEYS[2], ARGV[1])
 if seen then
   return {'REPEAT', epoch, seen}
+end
+local owner = redis.call('GET', KEYS[3])
+if owner and owner ~= ARGV[6] then
+  return {'REJECTED', 'duplicate_bid_id'}
 end
 local state = redis.call('HMGET', KEYS[1],
   'status', 'end_at_ms', 'start_price', 'high_amount', 'seq', 'ceiling')
@@ -96,6 +108,7 @@ redis.call('HSET', KEYS[1], 'seq', seq, 'high_amount', ARGV[4], 'high_bidder_id'
   'high_bidder_name', ARGV[3], 'high_is_bot', ARGV[5])
 redis.call('HSET', KEYS[2], ARGV[1],
   seq .. '|' .. ARGV[4] .. '|' .. ARGV[2] .. '|' .. ARGV[5] .. '|' .. ARGV[3])
+redis.call('SET', KEYS[3], ARGV[6], 'EX', ARGV[7])
 return {'ACCEPTED', epoch, seq, state[2]}
 """
 )
