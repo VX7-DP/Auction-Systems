@@ -96,6 +96,27 @@ describe('auction page', () => {
     expect(backend.requests.filter((r) => r.path.endsWith('/bids'))).toHaveLength(0)
   })
 
+  test('a first bid must beat the opening price, and is refused before it is sent', async () => {
+    const { backend } = openAuction({ signedInAs: 'Asha' })
+    await live()
+
+    fireEvent.change(screen.getByLabelText('Or enter your own amount'), { target: { value: '1000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Bid' }))
+    expect(await screen.findByText(`Bid more than the opening price of ${formatMoney(100_000)}.`)).toBeTruthy()
+    expect(backend.requests.filter((r) => r.path.endsWith('/bids'))).toHaveLength(0)
+  })
+
+  test('an auction that ended without bids does not invite a first bid', async () => {
+    const { backend } = openAuction()
+    await live()
+    act(() => backend.closeNow(auctionId))
+
+    expect(await screen.findByText('No bids were placed.')).toBeTruthy()
+    expect(within(priceCard()).getByText('Opening price')).toBeTruthy()
+    expect(within(priceCard()).queryByText('Winning bid')).toBeNull()
+    expect(screen.queryByText(/Be the first/)).toBeNull()
+  })
+
   test('shows the outbid notice when someone beats my bid', async () => {
     const { backend } = openAuction({ signedInAs: 'Asha' })
     await live()
