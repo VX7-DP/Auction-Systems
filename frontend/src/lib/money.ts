@@ -1,5 +1,5 @@
 import { MAX_AMOUNT } from '../api/contract.ts'
-import { CURRENCY } from '../config.ts'
+import { CURRENCY, MAX_RAISE_PERCENT, MIN_MAX_RAISE } from '../config.ts'
 
 /** Digits after the decimal point for a currency: 2 for INR, USD and EUR, 0 for JPY. */
 export function minorDigits(currency: string = CURRENCY): number {
@@ -71,6 +71,24 @@ export function niceStep(minor: number, digits: number = minorDigits()): number 
       if (step >= target) return step
     }
   }
+}
+
+/**
+ * The highest amount one bid may reach: the current price (the opening price before any
+ * bid) plus the larger of MAX_RAISE_PERCENT of it and MIN_MAX_RAISE. Computed with
+ * BigInt, so it stays exact up to MAX_AMOUNT, like the server's check.
+ */
+export function maxBid(
+  highAmount: number | null,
+  startPrice: number,
+  percent: number = MAX_RAISE_PERCENT,
+  minRaise: number = MIN_MAX_RAISE,
+): number {
+  const floor = BigInt(highAmount ?? startPrice)
+  const byPercent = (floor * BigInt(percent)) / 100n
+  const raise = byPercent > BigInt(minRaise) ? byPercent : BigInt(minRaise)
+  const cap = floor + raise
+  return cap > BigInt(MAX_AMOUNT) ? MAX_AMOUNT : Number(cap)
 }
 
 /**
