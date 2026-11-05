@@ -210,3 +210,60 @@ async def test_a_bid_decided_as_the_auction_reopens_becomes_the_high_bid(
     await assert_high_bid(stores, auction.id, amount=200, bidder=ben, seq=result.seq)
     reopened = [e for e in published if isinstance(e, AuctionUpdate) and e.seq < result.seq]
     assert [(e.status, e.high_amount) for e in reopened] == [("open", 120)]
+
+
+async def test_a_bid_saved_just_before_a_pause_leads_while_paused(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    stores: Stores,
+    client: httpx.AsyncClient,
+    hold_bid_insert: HoldBidInsert,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Asha's bid commits, but its confirmation in Redis lands only after Kenji's failed
+    bid has paused the auction. While paused, the saved high bid is Asha's, so that is
+    what Redis and the snapshot must show (section 10: paused means high = confirmed)."""
+    auction = await create_auction(start_price=100)
+    ben, asha = new_bidder("Ben"), new_bidder("Asha")
+    assert (await bid(auction.id, ben, 120)).status == "accepted"
+
+    release = asyncio.Event()
+    real_confirm = scripts.CONFIRM
+
+    async def confirm_after_release(redis: Redis, keys: list[str], args: list[str]) -> object:
+        if args[3] == str(asha.id):
+            await release.wait()
+        return await real_confirm(redis, keys, args)
+
+    monkeypatch.setattr(scripts, "CONFIRM", confirm_after_release)
+
+    asha_bid_id = uuid.uuid4()
+    asha_task = asyncio.create_task(bid(auction.id, asha, 150, bid_id=asha_bid_id))
+
+    async def saved() -> bool:
+        return any(row["bid_id"] == asha_bid_id for row in await stores.bids(auction.id))
+
+    await poll_until(saved, task=asha_task, what="Asha's bid to be saved")
+    failed = await _bid_that_postgres_never_takes(
+        hold_bid_insert, auction.id, new_bidder("Kenji"), 200
+    )
+    assert failed.status == "error"
+    release.set()
+    assert (await asha_task).status == "accepted"
+
+    redis_hash = await stores.hash(auction.id)
+    assert redis_hash["status"] == "paused"
+    assert (redis_hash.get("high_amount"), redis_hash.get("high_bidder_id")) == (
+        "150",
+        str(asha.id),
+    )
+    assert (redis_hash["confirmed_amount"], redis_hash["confirmed_bidder_id"]) == (
+        "150",
+        str(asha.id),
+    )
+    response = await client.get(f"/api/auctions/{auction.id}")
+    snapshot = AuctionSnapshot.model_validate(response.json())
+    assert (snapshot.status, snapshot.high_amount, snapshot.high_bidder_id) == (
+        "paused",
+        150,
+        asha.id,
+    )
