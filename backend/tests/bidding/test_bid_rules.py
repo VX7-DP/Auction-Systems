@@ -79,23 +79,23 @@ async def test_a_bid_above_the_maximum_raise_is_too_high(
     create_auction: Callable[..., Awaitable[AuctionSnapshot]], stores: Stores
 ) -> None:
     """One bid may raise the price by at most the larger of 100% of it and 1,000.00
-    (100_000 minor units): an opening price of 1.00 allows up to 1,001.00, a lead of
-    3,000.00 allows up to 6,000.00."""
+    (100_000 minor units): an opening price of 1.00 allows up to 1,001.00, then 1,001.00
+    allows up to 2,002.00, and a lead of 2,000.00 allows up to 4,000.00."""
     auction = await create_auction(start_price=100)
     asha, ben = new_bidder("Asha"), new_bidder("Ben")
 
     over_first = await bid(auction.id, asha, 100_101)
     first = await bid(auction.id, asha, 100_100)
-    lead = await bid(auction.id, ben, 300_000)
-    over_double = await bid(auction.id, asha, 600_001)
-    double = await bid(auction.id, asha, 600_000)
+    lead = await bid(auction.id, ben, 200_000)
+    over_double = await bid(auction.id, asha, 400_001)
+    double = await bid(auction.id, asha, 400_000)
 
     assert over_first == rejected(over_first.bid_id, "too_high")
     assert first == accepted(first.bid_id, 1)
     assert lead == accepted(lead.bid_id, 2)
     assert over_double == rejected(over_double.bid_id, "too_high")
     assert double == accepted(double.bid_id, 3)
-    await assert_high_bid(stores, auction.id, amount=600_000, bidder=asha, seq=3)
+    await assert_high_bid(stores, auction.id, amount=400_000, bidder=asha, seq=3)
 
 
 async def test_the_maximum_raise_is_exact_for_large_prices(
