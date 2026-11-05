@@ -196,8 +196,8 @@ Defaults are in effect unless the owner changes them.
 - **Real-time library.** Default: plain FastAPI WebSockets, push only, since bids go over REST. That's little plumbing and keeps load testing simple. Alternative: python-socketio with its Redis manager, which adds rooms and reconnect but ties clients and load tests to the Socket.IO protocol.
 - **Other libraries:** redis-py's asyncio client; SQLAlchemy 2.0 async over asyncpg, with plain SQL for the bid write; Alembic for migrations.
 - **Sign-in:** guests pick a display name, kept in a signed cookie. The admin page sits behind one password from an environment variable.
-- **Observability:** not in Stages 1–2. The public metrics view uses app-level counters (bids accepted and rejected, bid latency percentiles). OpenTelemetry + Grafana come later.
-- **Load-test tool:** open until Stage 3. It must drive WebSocket viewers as well as HTTP bids.
+- **Observability:** not in Stages 1–2. The public metrics view uses app-level counters (bids accepted and rejected, bid latency percentiles), served by `GET /api/metrics` and kept in process memory per instance. OpenTelemetry + Grafana come later.
+- **Load-test tool:** k6 (decided 5 Nov), pinned as `grafana/k6:2.2.0`. It drives HTTP bidders and WebSocket viewers from one script, runs in Docker with nothing to install, and writes a JSON summary. The cost is a third language (JavaScript, `loadtest/` only). `loadtest/run.py` runs it against Compose, checks Postgres afterwards and writes `loadtest/results/`.
 - **Host:** open until Stage 2 (section 8).
 
 ## 12. Retired or superseded
