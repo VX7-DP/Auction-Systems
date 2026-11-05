@@ -73,3 +73,42 @@ async def test_amounts_up_to_max_amount_stay_exact(
     assert (first, second) == (accepted(first.bid_id, 1), accepted(second.bid_id, 2))
     assert [row["amount"] for row in await stores.bids(auction.id)] == [MAX_AMOUNT - 1, MAX_AMOUNT]
     await assert_high_bid(stores, auction.id, amount=MAX_AMOUNT, bidder=ben, seq=2)
+
+
+async def test_a_bid_above_the_maximum_raise_is_too_high(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]], stores: Stores
+) -> None:
+    """One bid may raise the price by at most the larger of 100% of it and 1,000.00
+    (100_000 minor units): an opening price of 1.00 allows up to 1,001.00, a lead of
+    3,000.00 allows up to 6,000.00."""
+    auction = await create_auction(start_price=100)
+    asha, ben = new_bidder("Asha"), new_bidder("Ben")
+
+    over_first = await bid(auction.id, asha, 100_101)
+    first = await bid(auction.id, asha, 100_100)
+    lead = await bid(auction.id, ben, 300_000)
+    over_double = await bid(auction.id, asha, 600_001)
+    double = await bid(auction.id, asha, 600_000)
+
+    assert over_first == rejected(over_first.bid_id, "too_high")
+    assert first == accepted(first.bid_id, 1)
+    assert lead == accepted(lead.bid_id, 2)
+    assert over_double == rejected(over_double.bid_id, "too_high")
+    assert double == accepted(double.bid_id, 3)
+    await assert_high_bid(stores, auction.id, amount=600_000, bidder=asha, seq=3)
+
+
+async def test_the_maximum_raise_is_exact_for_large_prices(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]], stores: Stores
+) -> None:
+    """Doubling a price this large is beyond a double's exact range if done naively."""
+    start = 123_456_789_012_345
+    auction = await create_auction(start_price=start)
+    asha = new_bidder("Asha")
+
+    over = await bid(auction.id, asha, 2 * start + 1)
+    at_cap = await bid(auction.id, asha, 2 * start)
+
+    assert over == rejected(over.bid_id, "too_high")
+    assert at_cap == accepted(at_cap.bid_id, 1)
+    await assert_high_bid(stores, auction.id, amount=2 * start, bidder=asha, seq=1)
