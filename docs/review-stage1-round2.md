@@ -1,10 +1,10 @@
 # Stage 1 review, round 2
 
-This review covers `main` at 43098c9 (#16), checked against CLAUDE.md sections 4 and 10. Round 1 (`docs/review-stage1.md`) didn't see the fixes it led to (#15) or the front-end redesign (#16). Every confirmed finding has a failing test. Following section 11, the hot-path fixes (B1 to B3) wait until the owner approves their tests. The front-end fixes (F1 to F6) are done.
+This review covers `main` at 43098c9 (#16), checked against CLAUDE.md sections 4 and 10. Round 1 (`docs/review-stage1.md`) didn't see the fixes it led to (#15) or the front-end redesign (#16). Every confirmed finding has a failing test. The owner approved the back-end tests on 5 Nov before B1 to B3 were fixed (section 11). All fixes are in.
 
 Severity order: lost or misordered bid > wrong live state > crash > minor.
 
-## Confirmed: back end (awaiting approval)
+## Confirmed: back end
 
 ### B1. A bid decided as an auction reopens never becomes its high bid
 
@@ -19,7 +19,7 @@ Severity order: lost or misordered bid > wrong live state > crash > minor.
   5. Ben's save inserts his bid. Its `UPDATE auctions … WHERE high_seq < 5` matches nothing, so `auctions.high_*` stays on Asha's 120.
 - **Result:** if no later bid arrives, `record_close` names Asha the winner, although Ben's higher bid is saved. After any reload, Redis takes its floor from Postgres (120), so a bid between 120 and 200 would be accepted after Ben's.
 - **Test:** `backend/tests/bidding/test_write_failure.py::test_a_bid_decided_as_the_auction_reopens_becomes_the_high_bid`. It fails with `assert (120, 'Asha') == (200, 'Ben')`.
-- **Proposed fix:** `load_into_redis` returns the reopen seq from LOAD's result. `_announce_reopened` records that seq and publishes an update built from what LOAD wrote (the Postgres state), not a later read of the hash.
+- **Fix:** `load_into_redis` returns the reopen seq from LOAD's result. `_announce_reopened` records that seq and publishes an update built from what LOAD wrote (the Postgres state), not a later read of the hash.
 
 ### B2. A snapshot taken during the close can name a bid that lost
 
@@ -33,7 +33,7 @@ Severity order: lost or misordered bid > wrong live state > crash > minor.
   4. The page's `applySnapshot` sees `closed`, shows Asha as the winner, stops listening, and drops the buffered `auction_closed` event that named Ben.
 - **Result:** some pages show the wrong winner for good. If the reload after the close fails, Redis keeps the wrong high bid until it restarts, because the sweeper skips closed auctions.
 - **Test:** `backend/tests/bidding/test_close.py::test_a_snapshot_during_the_close_never_names_a_bid_that_lost`. It fails with a closed snapshot naming Asha at 150 while the close announced Ben at 120.
-- **Proposed fix:** when Redis says `closed`, the snapshot answers from Postgres. That is final once `record_close` commits. Before then it still shows the pre-close state: `open`, past `end_at`. `list_auctions` keeps Redis's status but takes the amount from Postgres.
+- **Fix:** when Redis says `closed`, the snapshot answers from Postgres. That is final once `record_close` commits. Before then it still shows the pre-close state: `open`, past `end_at`. `list_auctions` keeps Redis's status but takes the amount from Postgres.
   - Tradeoff: for those few ms the snapshot's seq is Postgres's, which can be lower than a seq the page already shows. Pages keep their newer view and pick up the close event.
 
 ### B3. A bid confirmed after a pause doesn't lead while paused
@@ -47,7 +47,7 @@ Severity order: lost or misordered bid > wrong live state > crash > minor.
   3. Asha's CONFIRM then raises `confirmed_*` to her bid but leaves `high_*` on Ben.
 - **Result:** while paused, viewers see Ben's lower bid as the leader. Asha can get "you've been outbid" by a bid lower than hers.
 - **Test:** `backend/tests/bidding/test_write_failure.py::test_a_bid_saved_just_before_a_pause_leads_while_paused`. It fails with `('120', <Ben>) == ('150', <Asha>)`.
-- **Proposed fix:** when CONFIRM records a bid while the auction is paused, it sets `high_*` to that bid as well.
+- **Fix:** when CONFIRM records a bid while the auction is paused, it sets `high_*` to that bid as well.
 
 ## Confirmed: front end (fixed)
 
@@ -79,5 +79,9 @@ Each test failed before its fix.
 
 ## Fixes
 
-- F1 to F6: done (4b2df44, 55db2c4, fca59ba, 896730a).
-- B1 to B3: the failing tests are committed (32953f6, 1f1dba4, 57aab7c). The fixes wait for the owner's approval of those tests.
+The owner approved the B1 to B3 tests (32953f6, 1f1dba4, 57aab7c) on 5 Nov.
+
+- B1: `load_into_redis` returns LOAD's reopen seq, and `_announce_reopened` records and publishes the state LOAD wrote.
+- B2: once Redis says `closed`, `GET /api/auctions/{id}` answers from Postgres, and `GET /api/auctions` takes the amount from Postgres.
+- B3: `CONFIRM` also raises `high_*` while the auction is paused.
+- F1 to F6: as in the table above (4b2df44, 55db2c4, fca59ba, 896730a).
