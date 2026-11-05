@@ -183,7 +183,14 @@ describe('seq gaps', () => {
     expect(fetches).toHaveLength(1)
     lastSocket().send(update(4, 1800)) // arrives while the snapshot is in flight
 
-    await answer(snap(3, { high_amount: 1700, high_bidder_id: 'other', high_bidder_name: 'Riya' }))
+    await answer(
+      snap(3, {
+        high_amount: 1700,
+        high_bidder_id: 'other',
+        high_bidder_name: 'Riya',
+        recent_bids: [{ seq: 3, amount: 1700, bidder_name: 'Riya', is_bot: true, created_at: END }],
+      }),
+    )
 
     expect(state.view?.seq).toBe(4)
     expect(state.view?.highAmount).toBe(1800)
@@ -409,4 +416,49 @@ test('stop() silences the feed', async () => {
   expect(changes).toBe(before)
   expect(sockets).toHaveLength(1)
   expect(lastSocket().closed).toBe(true)
+})
+
+describe('history stays true to the server', () => {
+  const ben = { seq: 1, amount: 1200, bidder_name: 'Ben', is_bot: true, created_at: END }
+
+  test('a pause or reopen is not a new bid', async () => {
+    // The snapshot shows Asha's 1500 still being saved; history has only Ben's 1200.
+    await live(2, { high_amount: 1500, high_bidder_id: 'asha', high_bidder_name: 'Asha', recent_bids: [ben] })
+    // Her save failed: the pause shows Ben's saved bid, then the auction reopens.
+    lastSocket().send(update(3, 1200, 'ben', { status: 'paused', high_bidder_name: 'Ben' }))
+    expect(state.view?.status).toBe('paused')
+    lastSocket().send(update(4, 1200, 'ben', { status: 'open', high_bidder_name: 'Ben' }))
+
+    expect(state.view?.seq).toBe(4)
+    expect(state.view?.bids.map((b) => b.seq)).toEqual([1])
+  })
+
+  test('a bid still being saved when the snapshot was read still reaches the history', async () => {
+    await live(2, { high_amount: 1500, high_bidder_id: 'other', high_bidder_name: 'Riya', recent_bids: [ben] })
+    // Its event arrives once it is saved, at a seq the view already shows.
+    lastSocket().send(update(2, 1500))
+    expect(fetches).toHaveLength(1)
+    await answer(
+      snap(2, {
+        high_amount: 1500,
+        recent_bids: [{ seq: 2, amount: 1500, bidder_name: 'Riya', is_bot: true, created_at: END }, ben],
+      }),
+    )
+    expect(state.view?.bids.map((b) => b.seq)).toEqual([2, 1])
+  })
+
+  test('auction_closed with no winner clears the high bid', async () => {
+    await live(1, { high_amount: 1500, high_bidder_id: 'asha', high_bidder_name: 'Asha' })
+    lastSocket().send({ type: 'auction_closed', auction_id: ID, seq: 2, winner_id: null, winner_name: null, amount: null })
+    expect(state.view?.highAmount).toBeNull()
+    expect(state.view?.winner).toEqual({ id: null, name: null, amount: null })
+  })
+
+  test('auction_closed keeps a winning bot labelled when the page showed someone else', async () => {
+    // The page saw Asha's 1500 being saved; the close fenced it off and Ben (a bot) won.
+    await live(2, { high_amount: 1500, high_bidder_id: 'asha', high_bidder_name: 'Asha', high_is_bot: false, recent_bids: [ben] })
+    lastSocket().send({ type: 'auction_closed', auction_id: ID, seq: 3, winner_id: 'ben', winner_name: 'Ben', amount: 1200 })
+    expect(state.view?.highAmount).toBe(1200)
+    expect(state.view?.highIsBot).toBe(true)
+  })
 })

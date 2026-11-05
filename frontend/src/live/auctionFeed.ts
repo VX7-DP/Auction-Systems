@@ -245,7 +245,11 @@ export function createAuctionFeed(options: AuctionFeedOptions): AuctionFeed {
       return
     }
     const seq = state.view.seq
-    if (event.seq <= seq) return // duplicate or already in the snapshot
+    if (event.seq <= seq) {
+      // Duplicate or already in the snapshot, unless it's a bid the history lacks.
+      if (isUnseenBid(event, state.view)) requestResync()
+      return
+    }
     if (event.seq === seq + 1) {
       applyEvent(event)
       drainBuffer()
@@ -263,13 +267,18 @@ export function createAuctionFeed(options: AuctionFeedOptions): AuctionFeed {
     }
     buffer.sort((a, b) => a.seq - b.seq)
     const remaining: AuctionEvent[] = []
+    let unseenBid = false
     for (const event of buffer) {
       const seq = state.view.seq
-      if (event.seq <= seq) continue
+      if (event.seq <= seq) {
+        unseenBid ||= isUnseenBid(event, state.view)
+        continue
+      }
       if (event.seq === seq + 1) applyEvent(event)
       else remaining.push(event)
     }
     buffer = remaining
+    if (unseenBid) requestResync()
     if (buffer.length === 0 || finished) {
       buffer = []
       gapRetries = 0
@@ -289,7 +298,12 @@ export function createAuctionFeed(options: AuctionFeedOptions): AuctionFeed {
     const previous = state.view!
     let view: AuctionView
     if (event.type === 'auction_update') {
-      const isBid = event.high_amount !== null && event.high_amount !== previous.highAmount
+      // Pause and reopen events carry the saved high bid; only a change while open is a new bid.
+      const isBid =
+        previous.status === 'open' &&
+        event.status === 'open' &&
+        event.high_amount !== null &&
+        event.high_amount !== previous.highAmount
       const bids = isBid
         ? sortRows([
             {
@@ -325,10 +339,15 @@ export function createAuctionFeed(options: AuctionFeedOptions): AuctionFeed {
         ...previous,
         seq: event.seq,
         status: 'closed',
-        highAmount: event.amount ?? previous.highAmount,
+        highAmount: event.amount,
         highBidderId: event.winner_id,
         highBidderName: event.winner_name,
-        highIsBot: event.winner_id === previous.highBidderId ? previous.highIsBot : null,
+        // The event has no bot flag: take it from the winning bid's row if we have it.
+        highIsBot:
+          event.winner_id === null
+            ? null
+            : (previous.bids.find((row) => row.amount === event.amount)?.isBot ??
+              (event.winner_id === previous.highBidderId ? previous.highIsBot : null)),
         winner: { id: event.winner_id, name: event.winner_name, amount: event.amount },
       }
     }
@@ -458,6 +477,17 @@ export function createAuctionFeed(options: AuctionFeedOptions): AuctionFeed {
     },
     getState: () => state,
   }
+}
+
+/**
+ * A saved bid at or below the view's seq that the history doesn't have: it was still being
+ * saved when the snapshot was read (Redis showed it, Postgres didn't yet). Amounts only
+ * rise, so a row with the same amount means it's already there (or it's a reopen event).
+ */
+function isUnseenBid(event: AuctionEvent, view: AuctionView): boolean {
+  if (event.type !== 'auction_update' || event.status !== 'open' || event.high_amount === null) return false
+  const newestRowSeq = view.bids[0]?.seq ?? 0
+  return event.seq > newestRowSeq && !view.bids.some((row) => row.amount === event.high_amount)
 }
 
 function sortRows(rows: BidRow[]): BidRow[] {
