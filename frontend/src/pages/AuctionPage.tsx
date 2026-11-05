@@ -121,14 +121,14 @@ export function AuctionPage({ auctionId }: { auctionId: string }) {
         <div className="col-main stmt">
           <section className="price-card" aria-label="Current bid">
             <div className="srow">
-              <p className="slabel">{closed ? 'Winning bid' : view.highAmount === null ? 'Opening price' : 'Current bid'}</p>
+              <p className="slabel">{view.highAmount === null ? 'Opening price' : closed ? 'Winning bid' : 'Current bid'}</p>
               <div className="sval">
                 <p key={view.highAmount ?? 'none'} className={view.bids[0]?.fresh ? 'hero amount flash' : 'hero amount'}>
                   {formatMoney(view.highAmount ?? view.startPrice)}
                 </p>
                 <p className="byline">
                   {view.highAmount === null ? (
-                    <span className="byline-none">No bids yet. Be the first.</span>
+                    <span className="byline-none">{closed ? 'No bids were placed.' : 'No bids yet. Be the first.'}</span>
                   ) : iLead ? (
                     <span className="youline">
                       <LeadIcon />
