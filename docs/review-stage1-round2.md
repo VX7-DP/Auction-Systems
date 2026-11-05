@@ -1,6 +1,6 @@
 # Stage 1 review, round 2
 
-This review covers `main` at 43098c9 (#16), checked against CLAUDE.md sections 4 and 10. Round 1 (`docs/review-stage1.md`) didn't see the fixes it led to (#15) or the front-end redesign (#16). Every confirmed finding has a failing test. The owner approved the back-end tests on 5 Nov before B1 to B3 were fixed (section 11). All fixes are in.
+This review covers `main` at 43098c9 (#16), checked against sections 4 and 10 of the project design doc. Round 1 (`docs/review-stage1.md`) didn't see the fixes it led to (#15) or the front-end redesign (#16). Every confirmed finding has a failing test. The owner approved the back-end tests on 5 Nov before B1 to B3 were fixed (section 11). All fixes are in.
 
 Severity order: lost or misordered bid > wrong live state > crash > minor.
 
