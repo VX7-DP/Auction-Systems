@@ -51,8 +51,20 @@ async def _place_bid(
     is_bot: bool,
 ) -> BidResult:
     redis = get_resources().redis
-    keys = [auction_key(auction_id), scripts.bid_memory_key(auction_id)]
-    args = [str(bid_id), str(bidder_id), bidder_name, str(amount), "1" if is_bot else "0"]
+    keys = [
+        auction_key(auction_id),
+        scripts.bid_memory_key(auction_id),
+        scripts.bid_owner_key(bid_id),
+    ]
+    args = [
+        str(bid_id),
+        str(bidder_id),
+        bidder_name,
+        str(amount),
+        "1" if is_bot else "0",
+        str(auction_id),
+        str(get_bidding_settings().bid_owner_ttl_s),
+    ]
 
     for _ in range(MAX_DECISIONS):
         decision = await scripts.DECIDE(redis, keys, args)
@@ -98,8 +110,9 @@ async def _place_bid(
                 await reload_auction(auction_id)
             continue
         if outcome == "conflict":
-            # The bid_id belongs to a bid on another auction. Postgres is fine, so don't
-            # pause: reload, which drops this decision from Redis, and refuse the bid.
+            # The bid_id belongs to a bid on another auction whose owner key Redis lost
+            # (a restart; DECIDE refuses the rest). Postgres is fine, so don't pause:
+            # reload, which drops this decision from Redis, and refuse the bid.
             await reload_auction(auction_id)
             return BidResult(bid_id=bid_id, status="rejected", reason="duplicate_bid_id")
         # Redis accepted a bid that Postgres won't take: stop building on it.

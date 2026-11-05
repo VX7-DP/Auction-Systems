@@ -179,6 +179,7 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 - Hash `auction:{id}` with `status`, `end_at_ms`, `start_price`, `high_amount`, `high_bidder_id`, `high_bidder_name`, `high_is_bot`, `seq`, `epoch` (the `load_epoch` it was loaded under), `ceiling` (the highest seq it may hand out), and `confirmed_seq`, `confirmed_amount`, `confirmed_bidder_id`, `confirmed_bidder_name`, `confirmed_is_bot` (the highest bid Postgres has committed under this load).
 - Hash encodings: every value is a string. `status` is `open`, `paused` or `closed`. Number fields are base-10 integers: amounts in minor units, and `end_at_ms` in milliseconds since the Unix epoch. `high_bidder_id` is a lowercase UUID, `high_bidder_name` is plain text, and `high_is_bot` is `1` or `0`. The `high_*` fields are absent until the first accepted bid, and the `confirmed_*` fields (same encodings) until the first committed one. While `status` is `paused`, `high_*` equals `confirmed_*`, so a pause never shows a bid that wasn't saved.
 - Pub/Sub channel `auction:{id}:events`, carrying the WebSocket messages above as JSON.
+- String `bid:{bid_id}`: the id of the auction that accepted that bid, kept for a day (`BIDDING_BID_OWNER_TTL_S`). DECIDE refuses a `bid_id` another auction owns as `duplicate_bid_id`, before it changes anything. After a Redis restart the key may be gone; Postgres then refuses the bid instead.
 - Locks `lock:job:{name}`.
 
 **Code interfaces:**
