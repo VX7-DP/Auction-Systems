@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 
+import httpx
 import pytest
 from redis.asyncio import Redis
 
@@ -179,3 +180,73 @@ async def test_a_bid_saved_after_the_close_never_loses_to_it(
     assert (row["status"], row["high_amount"]) == ("closed", highest)
     redis_hash = await stores.hash(auction.id)
     assert (redis_hash["status"], redis_hash["high_amount"]) == ("closed", str(highest))
+
+
+async def test_a_snapshot_during_the_close_never_names_a_bid_that_lost(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    client: httpx.AsyncClient,
+    redis: Redis,
+    stores: Stores,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Asha's bid is decided before end_at, but the close fences it off. Viewers resync
+    while the close is recorded and announced (the fenced bid leaves a seq gap). A page
+    stops at the first closed snapshot it sees, so every closed snapshot must name the
+    winner the close announced: Ben."""
+    from app.bidding import sweeper
+    from app.bidding.sweeper import close_auction
+
+    auction = await _auction_ending_soon(create_auction, redis)
+    asha, ben = new_bidder("Asha"), new_bidder("Ben")
+    assert (await bid(auction.id, ben, 120)).status == "accepted"
+
+    asha_bid_id = uuid.uuid4()
+    release = asyncio.Event()
+    real_save_bid = store.save_bid
+
+    async def save_bid_after_release(*args: object, **kwargs: object) -> None:
+        if args[3].bid_id == asha_bid_id:  # type: ignore[attr-defined]
+            await release.wait()
+        await real_save_bid(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store, "save_bid", save_bid_after_release)
+
+    snapshots: list[AuctionSnapshot] = []
+
+    async def take_snapshot() -> None:
+        response = await client.get(f"/api/auctions/{auction.id}")
+        assert response.status_code == 200, response.text
+        snapshots.append(AuctionSnapshot.model_validate(response.json()))
+
+    real_record_close = store.record_close
+    real_publish = sweeper.publish
+    announced: list[AuctionClosed] = []
+
+    async def snapshot_then_record_close(*args: object, **kwargs: object) -> object:
+        await take_snapshot()
+        return await real_record_close(*args, **kwargs)  # type: ignore[arg-type]
+
+    async def publish_then_snapshot(redis_client: Redis, event: object) -> None:
+        await real_publish(redis_client, event)  # type: ignore[arg-type]
+        if isinstance(event, AuctionClosed):
+            announced.append(event)
+            await take_snapshot()
+
+    monkeypatch.setattr(store, "record_close", snapshot_then_record_close)
+    monkeypatch.setattr(sweeper, "publish", publish_then_snapshot)
+
+    late = asyncio.create_task(bid(auction.id, asha, 150, bid_id=asha_bid_id))
+
+    async def decided() -> bool:
+        return (await stores.hash(auction.id)).get("high_amount") == "150"
+
+    await poll_until(decided, task=late, what="Redis to accept Asha's bid")
+    await wait_until_redis_time(redis, auction.end_at)
+    await close_auction(auction.id)
+    release.set()
+    assert (await late).status == "rejected"  # fenced off by the close
+
+    assert [(e.winner_id, e.amount) for e in announced] == [(ben.id, 120)]
+    closed = [s for s in snapshots if s.status == "closed"]
+    assert closed, "no snapshot was taken after the close was recorded"
+    assert [(s.high_bidder_id, s.high_amount) for s in closed] == [(ben.id, 120)] * len(closed)

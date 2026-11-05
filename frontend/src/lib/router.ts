@@ -14,7 +14,13 @@ export function matchRoute(pathname: string): Route {
   if (path === '/sign-in') return { name: 'sign-in' }
   if (path === '/admin') return { name: 'admin' }
   const auction = /^\/auctions\/([^/]+)$/.exec(path)
-  if (auction) return { name: 'auction', id: decodeURIComponent(auction[1]) }
+  if (auction) {
+    try {
+      return { name: 'auction', id: decodeURIComponent(auction[1]) }
+    } catch {
+      return { name: 'not-found' } // a broken %-escape would otherwise blank the app
+    }
+  }
   return { name: 'not-found' }
 }
 

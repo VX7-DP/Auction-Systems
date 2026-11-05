@@ -4,6 +4,12 @@ Live fields (status, seq, high bid, end_at, start_price) come from the Redis has
 bid engine keeps. Title and bid history come from Postgres. When an auction's hash is
 missing or Redis is unreachable, every field comes from Postgres, which holds the
 confirmed state.
+
+A closed auction's winner is Postgres's to say (app.bidding.store.record_close). Until
+the sweeper reloads it, Redis can still hold a bid the close fenced off as its high
+bid, and before record_close commits the winner isn't known at all. So once Redis says
+closed, the snapshot answers from Postgres (the pre-close state until the close is
+recorded), and the list takes the amount from Postgres.
 """
 
 from typing import Annotated
@@ -49,7 +55,9 @@ async def list_auctions(session: DbSession, redis: RedisClient) -> list[AuctionS
                 id=row.id,
                 title=row.title,
                 status=state.status if state else row.status,
-                high_amount=state.high_amount if state else row.high_amount,
+                high_amount=(
+                    state.high_amount if state and state.status != "closed" else row.high_amount
+                ),
                 end_at=state.end_at if state else row.end_at,
             )
         )
@@ -64,6 +72,8 @@ async def get_auction(auction_id: UUID, session: DbSession, redis: RedisClient) 
     bid committed in between belongs to a later event, not to this snapshot.
     """
     state = (await read_live_states(redis, [auction_id])).get(auction_id)
+    if state is not None and state.status == "closed":
+        state = None  # the winner comes from Postgres (see the module docstring)
     auction = await session.get(Auction, auction_id)
     if auction is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such auction.")

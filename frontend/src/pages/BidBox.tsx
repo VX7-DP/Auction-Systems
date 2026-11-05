@@ -43,6 +43,10 @@ export function BidBox({ view, bidding, now }: { view: AuctionView; bidding: Pla
       setInputError(parsed.error)
       return
     }
+    if (view.highAmount === null && parsed.value <= view.startPrice) {
+      setInputError(`Bid more than the opening price of ${formatMoney(view.startPrice)}.`)
+      return
+    }
     if (view.highAmount !== null && parsed.value <= view.highAmount) {
       setInputError(`Bid more than ${formatMoney(view.highAmount)}.`)
       return
@@ -115,7 +119,7 @@ export function BidBox({ view, bidding, now }: { view: AuctionView; bidding: Pla
           </div>
           <p id="bid-hint" className="hint num">
             {view.highAmount === null
-              ? `Opening price ${formatMoney(view.startPrice)}`
+              ? `Must be more than the opening price, ${formatMoney(view.startPrice)}`
               : `Must be more than ${formatMoney(view.highAmount)}`}
           </p>
           {inputError && (
