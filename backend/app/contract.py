@@ -139,6 +139,37 @@ class Health(BaseModel):
     redis: Literal["up", "down"]
 
 
+# --- REST: metrics ----------------------------------------------------------------
+
+
+class BidCounts(BaseModel):
+    """Every place_bid call since this server instance started, by outcome."""
+
+    accepted: int
+    # Every RejectReason is listed, with 0 when it hasn't happened.
+    rejected: dict[RejectReason, int]
+    error: int
+
+
+class BidLatency(BaseModel):
+    """place_bid duration in milliseconds over the most recent calls (at most `samples`
+    of them, whatever their outcome). The percentiles are None until the first call."""
+
+    samples: int
+    p50: float | None
+    p95: float | None
+    p99: float | None
+    max: float | None
+
+
+class MetricsSnapshot(BaseModel):
+    """GET /api/metrics: public, per server instance, reset when the instance restarts."""
+
+    started_at: UtcDatetime
+    bids: BidCounts
+    latency_ms: BidLatency
+
+
 # --- WebSocket /ws/auctions/{id} (server to client only) ---------------------------
 
 

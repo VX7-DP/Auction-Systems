@@ -156,6 +156,7 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 - `POST /api/auctions/{id}/bids {bid_id, amount}` → `{bid_id, status: accepted | rejected | error, reason?, seq?}`, where `reason` is `too_low`, `too_high` (more than one raise allows: the current price, or the opening price before any bid, plus the larger of `BIDDING_MAX_RAISE_PERCENT`% of it, default 100, and `BIDDING_MIN_MAX_RAISE` minor units, default 100000), `closed`, `paused`, `not_found` or `duplicate_bid_id` (the `bid_id` was already used on another auction; make a new one).
 - `POST /api/admin/auctions {title, start_price, end_at}` with an `X-Admin-Password` header → the new auction.
 - `GET /api/health` → Postgres and Redis status.
+- `GET /api/metrics` → `{started_at, bids: {accepted, rejected: {<reason>: count}, error}, latency_ms: {samples, p50, p95, p99, max}}`. Public, no sign-in. Counts every `place_bid` call (people and bots) on this server instance since it started; `rejected` lists every reason above, 0 included. `latency_ms` is the duration of `place_bid` over the most recent 10,000 calls, nearest-rank percentiles, all `null` before the first call. Kept in process memory: a restart resets it, and each instance reports only its own.
 
 **WebSocket** at `/ws/auctions/{id}`, server to client only. Each message is JSON with a `type` field:
 
