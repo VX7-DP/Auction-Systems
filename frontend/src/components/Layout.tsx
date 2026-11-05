@@ -13,18 +13,20 @@ export function Header() {
   const session = useSession()
   useLocation() // re-render on navigation so the sign-in link returns here
   return (
-    <header className="site-header">
-      <div className="container header-row">
+    <header className="hdr">
+      <div className="wrap hdr-in">
         <Link to="/" className="brand">
           <span className="brand-mark" aria-hidden="true" />
-          Live Auction
+          <span>
+            SummitTech<span className="brand-light"> Auctions</span>
+          </span>
         </Link>
-        <div className="header-session">
+        <div className="who-bar">
           {session.status === 'signed_in' && session.bidder && (
             <>
-              <span className="muted hide-narrow">Bidding as</span>
-              <strong className="name">{session.bidder.display_name}</strong>
-              <Link to={signInHref()} className="link-subtle">
+              <span className="who-as">Bidding as</span>
+              <strong className="who-name">{session.bidder.display_name}</strong>
+              <Link to={signInHref()}>
                 Change
               </Link>
             </>
@@ -42,19 +44,20 @@ export function Header() {
 
 export function Footer() {
   return (
-    <footer className="site-footer">
-      <div className="container footer-row">
-        <p className="muted">
+    <footer className="ftr">
+      <div className="wrap ftr-in">
+        <p>
           Demo: bidders marked <BotBadge /> are simulated, so there's always live action.
         </p>
-        <Link to="/admin" className="link-subtle">
-          Admin
-        </Link>
+        <div className="ftr-links">
+          <Link to="/admin">Admin</Link>
+          <a href="https://summittech.in">Built by Sumit · summittech.in</a>
+        </div>
       </div>
     </footer>
   )
 }
 
 export function Page({ children }: { children: ReactNode }) {
-  return <div className="container page">{children}</div>
+  return <div className="wrap page">{children}</div>
 }

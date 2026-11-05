@@ -1,4 +1,5 @@
 import type { AuctionStatus } from '../api/contract.ts'
+import { BadgeClockIcon, BadgePauseIcon } from './Icons.tsx'
 
 export function BotBadge() {
   return (
@@ -15,8 +16,20 @@ export function YouBadge() {
 /** Live, Closing (time is up, waiting for the server to close it), Paused or Ended. */
 export function StatusBadge({ status, endAt, now }: { status: AuctionStatus; endAt: string; now: number }) {
   if (status === 'closed') return <span className="badge badge-ended">Ended</span>
-  if (status === 'paused') return <span className="badge badge-paused">Paused</span>
-  if (Date.parse(endAt) <= now) return <span className="badge badge-paused">Closing</span>
+  if (status === 'paused')
+    return (
+      <span className="badge badge-paused">
+        <BadgePauseIcon />
+        Paused
+      </span>
+    )
+  if (Date.parse(endAt) <= now)
+    return (
+      <span className="badge badge-closing">
+        <BadgeClockIcon />
+        Closing
+      </span>
+    )
   return (
     <span className="badge badge-live">
       <span className="dot" aria-hidden="true" />

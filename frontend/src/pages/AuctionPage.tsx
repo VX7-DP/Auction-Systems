@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { BotBadge, StatusBadge, YouBadge } from '../components/Badges.tsx'
 import { ConnectionPill } from '../components/ConnectionPill.tsx'
 import { Countdown } from '../components/Countdown.tsx'
+import { CheckIcon, ErrorIcon, InfoIcon, LeadIcon, PauseIcon } from '../components/Icons.tsx'
 import { Page } from '../components/Layout.tsx'
 import { Link } from '../components/Link.tsx'
+import { AuctionSkeleton } from '../components/Skeletons.tsx'
 import type { AuctionView } from '../live/auctionFeed.ts'
 import { useAuctionFeed } from '../live/useAuctionFeed.ts'
 import { usePlaceBid } from '../live/usePlaceBid.ts'
@@ -34,10 +36,10 @@ export function AuctionPage({ auctionId }: { auctionId: string }) {
   if (feed.phase === 'not_found') {
     return (
       <Page>
-        <div className="empty">
-          <h1>Auction not found</h1>
-          <p className="muted">It may have been removed, or the link is wrong.</p>
-          <Link to="/" className="btn btn-primary">
+        <div className="narrow nf">
+          <h1 className="page-h">Auction not found</h1>
+          <p className="lede">It may have been removed, or the link is wrong.</p>
+          <Link to="/" className="btn btn-primary btn-lg">
             See all auctions
           </Link>
         </div>
@@ -50,11 +52,17 @@ export function AuctionPage({ auctionId }: { auctionId: string }) {
       <Page>
         <BackLink />
         {feed.loadError ? (
-          <div className="notice notice-error" role="alert">
-            We couldn't load this auction ({feed.loadError}). Retrying…
+          <div className="notices">
+            <div className="note note-error" role="alert">
+              <ErrorIcon />
+              <p>We couldn't load this auction ({feed.loadError}). Retrying…</p>
+            </div>
           </div>
         ) : (
-          <p className="muted">Loading auction…</p>
+          <>
+            <AuctionSkeleton />
+            <p className="hint">Loading auction…</p>
+          </>
         )}
       </Page>
     )
@@ -68,74 +76,80 @@ export function AuctionPage({ auctionId }: { auctionId: string }) {
   return (
     <Page>
       <BackLink />
-      <div className="auction-head">
-        <h1>{view.title}</h1>
-        <div className="auction-head-meta">
-          <StatusBadge status={view.status} endAt={view.endAt} now={now} />
-          <ConnectionPill connection={feed.connection} />
-        </div>
+      <h1 className="title-h">{view.title}</h1>
+      <div className="meta">
+        <StatusBadge status={view.status} endAt={view.endAt} now={now} />
+        <ConnectionPill connection={feed.connection} />
       </div>
 
-      {showOutbid && (
-        <div className="notice notice-warning outbid" role="alert">
-          <div>
-            <strong>You've been outbid.</strong>{' '}
-            {outbid.byName ?? 'Someone'} {outbid.byIsBot && <BotBadge />} bid{' '}
-            {outbid.amount !== null && formatMoney(outbid.amount)}.
-          </div>
-          <div className="notice-actions">
-            {view.status === 'open' && (
-              <button
-                className="btn btn-primary btn-sm"
-                disabled={bidding.inFlight}
-                onClick={() => void bidding.submit(nextBid(view.highAmount, view.startPrice))}
-              >
-                Bid {formatMoney(nextBid(view.highAmount, view.startPrice))}
+      <div className="notices">
+        {showOutbid && (
+          <div className="note note-outbid" role="alert">
+            <p>
+              <strong>You've been outbid.</strong>{' '}
+              <strong>{outbid.byName ?? 'Someone'}</strong> {outbid.byIsBot && <BotBadge />} bid{' '}
+              {outbid.amount !== null && <span className="num">{formatMoney(outbid.amount)}</span>}.
+            </p>
+            <div className="note-actions">
+              {view.status === 'open' && (
+                <button
+                  className="btn btn-primary"
+                  disabled={bidding.inFlight}
+                  onClick={() => void bidding.submit(nextBid(view.highAmount, view.startPrice))}
+                >
+                  Bid {formatMoney(nextBid(view.highAmount, view.startPrice))}
+                </button>
+              )}
+              <button className="btn btn-ghost" onClick={() => setDismissedOutbid(outbid.id)}>
+                Dismiss
               </button>
-            )}
-            <button className="btn btn-ghost btn-sm" onClick={() => setDismissedOutbid(outbid.id)}>
-              Dismiss
-            </button>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {view.status === 'paused' && (
-        <div className="notice notice-info" role="status">
-          Bidding is paused for a moment. It will resume shortly; no bids are lost.
-        </div>
-      )}
+        {view.status === 'paused' && (
+          <div className="note note-warn" role="status">
+            <PauseIcon />
+            <p>Bidding is paused for a moment. It will resume shortly; no bids are lost.</p>
+          </div>
+        )}
 
-      {closed && <ClosedResult view={view} me={me} />}
+        {closed && <ClosedResult view={view} me={me} />}
+      </div>
 
-      <div className="auction-layout">
-        <div className="stack">
-          <section className="card price-card" aria-label="Current bid">
-            <div className="price-row">
-              <div>
-                <p className="label">{closed ? 'Winning bid' : view.highAmount === null ? 'Opening price' : 'Current bid'}</p>
-                <p key={view.highAmount ?? 'none'} className={view.bids[0]?.fresh ? 'price flash' : 'price'}>
+      <div className="cols">
+        <div className="col-main stmt">
+          <section className="price-card" aria-label="Current bid">
+            <div className="srow">
+              <p className="slabel">{closed ? 'Winning bid' : view.highAmount === null ? 'Opening price' : 'Current bid'}</p>
+              <div className="sval">
+                <p key={view.highAmount ?? 'none'} className={view.bids[0]?.fresh ? 'hero amount flash' : 'hero amount'}>
                   {formatMoney(view.highAmount ?? view.startPrice)}
                 </p>
-                <p className="bidder-line">
+                <p className="byline">
                   {view.highAmount === null ? (
-                    <span className="muted">No bids yet. Be the first.</span>
+                    <span className="byline-none">No bids yet. Be the first.</span>
                   ) : iLead ? (
-                    <span className="lead-you">{closed ? 'You won' : "You're the highest bidder"}</span>
+                    <span className="youline">
+                      <LeadIcon />
+                      <span className="lead-you">{closed ? 'You won' : "You're the highest bidder"}</span>
+                    </span>
                   ) : (
                     <>
-                      <span className="muted">by</span> <strong>{view.highBidderName}</strong>{' '}
+                      <span>by</span> <strong>{view.highBidderName}</strong>{' '}
                       {view.highIsBot && <BotBadge />}
                     </>
                   )}
                 </p>
               </div>
-              <div className="time-block">
-                <p className="label">{closed ? 'Status' : 'Ends in'}</p>
-                <p className="time-left">
+            </div>
+            <div className="srow">
+              <p className="slabel">{closed ? 'Status' : 'Ends in'}</p>
+              <div className="sval">
+                <p className="hero">
                   <Countdown endAt={view.endAt} status={view.status} now={now} />
                 </p>
-                <p className="muted small">
+                <p className="sub">
                   {closed ? 'Ended' : 'Ends'} {formatDateTime(view.endAt)}
                 </p>
               </div>
@@ -151,7 +165,7 @@ export function AuctionPage({ auctionId }: { auctionId: string }) {
 
 function BackLink() {
   return (
-    <Link to="/" className="back-link">
+    <Link to="/" className="back">
       ← All auctions
     </Link>
   )
@@ -161,51 +175,55 @@ function ClosedResult({ view, me }: { view: AuctionView; me: string | null }) {
   const winner = view.winner
   if (!winner || winner.id === null) {
     return (
-      <div className="notice notice-info" role="status">
-        This auction has ended with no bids.
+      <div className="note note-info" role="status">
+        <InfoIcon />
+        <p>This auction has ended with no bids.</p>
       </div>
     )
   }
   if (winner.id === me) {
     return (
-      <div className="notice notice-success" role="status">
-        <div>
+      <div className="note note-success" role="status">
+        <CheckIcon />
+        <p>
           <strong>You won this auction</strong>
-          {winner.amount !== null && <> for {formatMoney(winner.amount)}</>}.
-        </div>
+          {winner.amount !== null && <> for <span className="num">{formatMoney(winner.amount)}</span></>}.
+        </p>
       </div>
     )
   }
   return (
-    <div className="notice notice-info" role="status">
-      <div>
+    <div className="note note-info" role="status">
+      <InfoIcon />
+      <p>
         Auction ended. Won by <strong>{winner.name}</strong>
         {view.highIsBot && <> <BotBadge /></>}
-        {winner.amount !== null && <> for {formatMoney(winner.amount)}</>}.
-      </div>
+        {winner.amount !== null && <> for <span className="num">{formatMoney(winner.amount)}</span></>}.
+      </p>
     </div>
   )
 }
 
 function BidHistory({ view }: { view: AuctionView }) {
   return (
-    <section className="card history" aria-labelledby="history-heading">
-      <h2 id="history-heading" className="section-title">
+    <section className="col-side stmt history" aria-labelledby="history-heading">
+      <h2 id="history-heading" className="label-caps hist-h">
         Bid history
       </h2>
       {view.bids.length === 0 ? (
-        <p className="muted">No bids yet.</p>
+        <p className="hist-empty">No bids yet.</p>
       ) : (
-        <ol className="history-list">
+        <ol className="hist">
           {view.bids.map((bid) => (
-            <li key={bid.seq} className={bid.fresh ? 'history-row history-row-new' : 'history-row'}>
-              <span className="history-amount">{formatMoney(bid.amount)}</span>
-              <span className="history-who">
-                {bid.bidderName} {bid.isBot && <BotBadge />} {bid.mine && <YouBadge />}
-              </span>
-              <time className="history-time muted" dateTime={bid.createdAt}>
+            <li key={bid.seq} className={bid.fresh ? 'hrow is-new' : 'hrow'}>
+              <time className="ht" dateTime={bid.createdAt}>
                 {formatClock(bid.createdAt)}
               </time>
+              <span className="hwho">
+                <span className="hnm">{bid.bidderName}</span> {bid.isBot && <BotBadge />} {bid.mine && <YouBadge />}
+              </span>
+              <span className="hlead" aria-hidden="true" />
+              <span className="hamt">{formatMoney(bid.amount)}</span>
             </li>
           ))}
         </ol>

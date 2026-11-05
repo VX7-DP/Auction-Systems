@@ -1,6 +1,7 @@
 import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { ApiError, createAuction } from '../api/client.ts'
 import type { AuctionSnapshot } from '../api/contract.ts'
+import { CheckIcon, ChevronIcon, ErrorIcon } from '../components/Icons.tsx'
 import { Page } from '../components/Layout.tsx'
 import { Link } from '../components/Link.tsx'
 import { currencySymbol, formatMoney, parseAmount } from '../lib/money.ts'
@@ -76,17 +77,20 @@ export function AdminPage() {
   if (created) {
     return (
       <Page>
-        <section className="card narrow" role="status">
-          <p className="label">Auction created</p>
-          <h1>{created.title}</h1>
-          <p className="muted">
+        <section className="narrow created" role="status">
+          <p className="label-caps created-label">
+            <CheckIcon size={16} />
+            Auction created
+          </p>
+          <h1 className="title-h">{created.title}</h1>
+          <p className="created-meta num">
             Opening price {formatMoney(created.start_price)} · ends {formatDateTime(created.end_at)}
           </p>
-          <div className="button-row">
-            <Link to={`/auctions/${created.id}`} className="btn btn-primary">
+          <div className="actions">
+            <Link to={`/auctions/${created.id}`} className="btn btn-primary btn-lg">
               Open auction
             </Link>
-            <button className="btn btn-secondary" onClick={() => setCreated(null)}>
+            <button className="btn btn-secondary btn-lg" onClick={() => setCreated(null)}>
               Create another
             </button>
           </div>
@@ -97,14 +101,14 @@ export function AdminPage() {
 
   return (
     <Page>
-      <section className="card narrow">
-        <h1>Create an auction</h1>
-        <p className="muted">It goes live as soon as you create it.</p>
-        <form className="stack" onSubmit={handleSubmit} noValidate>
+      <section className="narrow">
+        <h1 className="title-h">Create an auction</h1>
+        <p className="lede">It goes live as soon as you create it.</p>
+        <form className="form-fields" onSubmit={handleSubmit} noValidate>
           <Field id={`${id}-password`} label="Admin password" error={errors.password}>
             <input
               id={`${id}-password`}
-              className="input"
+              className="inp"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -114,7 +118,7 @@ export function AdminPage() {
           <Field id={`${id}-title`} label="Title" error={errors.title}>
             <input
               id={`${id}-title`}
-              className="input"
+              className="inp"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               maxLength={200}
@@ -122,13 +126,13 @@ export function AdminPage() {
             />
           </Field>
           <Field id={`${id}-price`} label="Opening price" error={errors.price}>
-            <span className="input-group">
-              <span className="input-prefix" aria-hidden="true">
+            <span className="cur">
+              <span className="cur-sym" aria-hidden="true">
                 {currencySymbol()}
               </span>
               <input
                 id={`${id}-price`}
-                className="input"
+                className="cur-input"
                 inputMode="decimal"
                 value={price}
                 onChange={(event) => setPrice(event.target.value)}
@@ -137,20 +141,23 @@ export function AdminPage() {
             </span>
           </Field>
           <Field id={`${id}-end`} label="Ends" error={errors.end}>
-            <select id={`${id}-end`} className="input" value={duration} onChange={(event) => setDuration(event.target.value)}>
-              {DURATIONS.map((option) => (
-                <option key={option.minutes} value={String(option.minutes)}>
-                  In {option.label}
-                </option>
-              ))}
-              <option value="custom">At a date and time…</option>
-            </select>
+            <span className="sel">
+              <select id={`${id}-end`} className="inp" value={duration} onChange={(event) => setDuration(event.target.value)}>
+                {DURATIONS.map((option) => (
+                  <option key={option.minutes} value={String(option.minutes)}>
+                    In {option.label}
+                  </option>
+                ))}
+                <option value="custom">At a date and time…</option>
+              </select>
+              <ChevronIcon />
+            </span>
           </Field>
           {duration === 'custom' && (
             <Field id={`${id}-custom`} label="End date and time (your time zone)">
               <input
                 id={`${id}-custom`}
-                className="input"
+                className="inp"
                 type="datetime-local"
                 value={customEnd}
                 onChange={(event) => setCustomEnd(event.target.value)}
@@ -158,11 +165,12 @@ export function AdminPage() {
             </Field>
           )}
           {errors.form && (
-            <p className="form-error" role="alert">
+            <p className="err" role="alert">
+              <ErrorIcon size={16} />
               {errors.form}
             </p>
           )}
-          <button className="btn btn-primary" type="submit" disabled={busy}>
+          <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={busy}>
             {busy ? 'Creating…' : 'Create auction'}
           </button>
         </form>
@@ -173,13 +181,14 @@ export function AdminPage() {
 
 function Field({ id, label, error, children }: { id: string; label: string; error?: string; children: ReactNode }) {
   return (
-    <div className="field">
-      <label className="field-label" htmlFor={id}>
+    <div className="fld">
+      <label className="lbl" htmlFor={id}>
         {label}
       </label>
       {children}
       {error && (
-        <span className="form-error" role="alert">
+        <span className="err" role="alert">
+          <ErrorIcon size={16} />
           {error}
         </span>
       )}

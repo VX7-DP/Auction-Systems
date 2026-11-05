@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useSession } from '../session/SessionContext.ts'
+import { ErrorIcon } from './Icons.tsx'
 
 const MAX_NAME = 40
 
@@ -41,11 +42,11 @@ export function SignInForm({
   }
 
   return (
-    <form className="stack-sm" onSubmit={handleSubmit} noValidate>
-      <label className="field">
-        <span className="field-label">Display name</span>
+    <form className="form-stack" onSubmit={handleSubmit} noValidate>
+      <label className="fld">
+        <span className="lbl">Display name</span>
         <input
-          className="input"
+          className="inp"
           value={name}
           onChange={(event) => setName(event.target.value)}
           maxLength={MAX_NAME}
@@ -56,11 +57,12 @@ export function SignInForm({
         />
       </label>
       {error && (
-        <p className="form-error" role="alert">
+        <p className="err" role="alert">
+          <ErrorIcon size={16} />
           {error}
         </p>
       )}
-      <button className="btn btn-primary" type="submit" disabled={busy}>
+      <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={busy}>
         {busy ? 'Signing in…' : submitLabel}
       </button>
     </form>

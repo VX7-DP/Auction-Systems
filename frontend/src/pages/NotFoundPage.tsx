@@ -6,10 +6,10 @@ export function NotFoundPage() {
   useDocumentTitle('Page not found')
   return (
     <Page>
-      <div className="empty">
-        <h1>Page not found</h1>
-        <p className="muted">The link may be broken, or the page may have moved.</p>
-        <Link to="/" className="btn btn-primary">
+      <div className="narrow nf">
+        <h1 className="page-h">Page not found</h1>
+        <p className="lede">The link may be broken, or the page may have moved.</p>
+        <Link to="/" className="btn btn-primary btn-lg">
           See all auctions
         </Link>
       </div>
