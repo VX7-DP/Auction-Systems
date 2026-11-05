@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-const APP_NAME = 'Live Auction'
+const APP_NAME = 'SummitTech Auctions'
 
 export function useDocumentTitle(title: string | null): void {
   useEffect(() => {

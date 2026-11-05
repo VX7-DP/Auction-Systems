@@ -3,8 +3,10 @@ import { listAuctions } from '../api/client.ts'
 import type { AuctionSummary } from '../api/contract.ts'
 import { StatusBadge } from '../components/Badges.tsx'
 import { Countdown } from '../components/Countdown.tsx'
+import { ErrorIcon } from '../components/Icons.tsx'
 import { Page } from '../components/Layout.tsx'
 import { Link } from '../components/Link.tsx'
+import { CardSkeletons } from '../components/Skeletons.tsx'
 import { LIST_POLL_MS } from '../config.ts'
 import { formatMoney } from '../lib/money.ts'
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts'
@@ -50,15 +52,16 @@ export function AuctionListPage() {
 
   return (
     <Page>
-      <section className="hero">
-        <h1>Live auctions</h1>
-        <p className="lead">
+      <section className="intro">
+        <h1 className="page-h">Live auctions</h1>
+        <p className="lede">
           Bids appear for everyone the moment they land. Pick an auction, choose a name and bid.
         </p>
       </section>
 
       {error && (
-        <div className="notice notice-error" role="alert">
+        <div className="note note-error note-action" role="alert">
+          <ErrorIcon />
           <span>We couldn't load the auctions. {error}</span>
           <button className="btn btn-secondary btn-sm" onClick={() => void load()}>
             Try again
@@ -66,34 +69,39 @@ export function AuctionListPage() {
         </div>
       )}
 
-      {auctions === null && !error && <p className="muted">Loading auctions…</p>}
+      {auctions === null && !error && (
+        <>
+          <p className="hint loading-hint">Loading auctions…</p>
+          <CardSkeletons />
+        </>
+      )}
 
       {auctions?.length === 0 && (
         <div className="empty">
           <h2>No auctions right now</h2>
-          <p className="muted">New auctions show up here as soon as they start.</p>
+          <p>New auctions show up here as soon as they start.</p>
         </div>
       )}
 
       {auctions && auctions.length > 0 && (
-        <ul className="auction-grid">
+        <ul className="grid">
           {sortAuctions(auctions).map((auction) => (
             <li key={auction.id}>
-              <Link to={`/auctions/${auction.id}`} className="card auction-card">
+              <Link to={`/auctions/${auction.id}`} className="card">
                 <div className="card-top">
-                  <h2 className="card-title">{auction.title}</h2>
+                  <h2 className="ct">{auction.title}</h2>
                   <StatusBadge status={auction.status} endAt={auction.end_at} now={now} />
                 </div>
-                <dl className="card-facts">
+                <dl className="stats">
                   <div>
                     <dt>{auction.status === 'closed' ? 'Final bid' : 'Current bid'}</dt>
-                    <dd className="amount">
-                      {auction.high_amount === null ? <span className="muted">No bids yet</span> : formatMoney(auction.high_amount)}
+                    <dd className="stat amount">
+                      {auction.high_amount === null ? <span className="stat-none">No bids yet</span> : formatMoney(auction.high_amount)}
                     </dd>
                   </div>
                   <div>
                     <dt>{auction.status === 'closed' ? 'Status' : 'Ends in'}</dt>
-                    <dd>
+                    <dd className="stat">
                       <Countdown endAt={auction.end_at} status={auction.status} now={now} />
                     </dd>
                   </div>

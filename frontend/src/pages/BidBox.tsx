@@ -1,4 +1,5 @@
 import { useId, useState, type FormEvent } from 'react'
+import { ClockIcon, ErrorIcon, NoticeIcon, PauseIcon } from '../components/Icons.tsx'
 import { SignInForm } from '../components/SignInForm.tsx'
 import type { AuctionView } from '../live/auctionFeed.ts'
 import type { PlaceBid } from '../live/usePlaceBid.ts'
@@ -17,18 +18,20 @@ export function BidBox({ view, bidding, now }: { view: AuctionView; bidding: Pla
   const disabled = bidding.inFlight || paused
 
   if (session.status === 'loading') {
-    return <section className="card bid-box" aria-busy="true" />
+    return <section className="srow bid-loading" aria-busy="true" />
   }
 
   if (session.status === 'signed_out' || !me) {
     return (
-      <section className="card bid-box" aria-labelledby="join-heading">
-        <h2 id="join-heading" className="section-title">
+      <section className="srow" aria-labelledby="join-heading">
+        <h2 id="join-heading" className="slabel">
           Join the bidding
         </h2>
-        <p className="muted">Pick a display name. No password or sign-up needed.</p>
-        <SignInForm submitLabel="Start bidding" />
-        {bidding.message && <p className="muted">{bidding.message.text}</p>}
+        <div className="sval bid">
+          <p className="bid-intro">Pick a display name. No password or sign-up needed.</p>
+          <SignInForm submitLabel="Start bidding" />
+          {bidding.message && <p className="hint">{bidding.message.text}</p>}
+        </div>
       </section>
     )
   }
@@ -58,65 +61,85 @@ export function BidBox({ view, bidding, now }: { view: AuctionView; bidding: Pla
       : bidding.message
 
   return (
-    <section className="card bid-box" aria-labelledby="bid-heading">
-      <h2 id="bid-heading" className="section-title">
+    <section className="srow" aria-labelledby="bid-heading">
+      <h2 id="bid-heading" className="slabel">
         Place a bid
       </h2>
-      {paused && <p className="muted">Bidding is paused for a moment. It will resume shortly.</p>}
-      {timeUp && !paused && <p className="muted">Time is up. Waiting for the auction to close…</p>}
-
-      <button
-        className="btn btn-primary btn-lg btn-block"
-        disabled={disabled}
-        onClick={() => void bidding.submit(suggested)}
-      >
-        {bidding.inFlight ? 'Placing bid…' : `Bid ${formatMoney(suggested)}`}
-      </button>
-
-      <form className="custom-bid" onSubmit={handleCustom} noValidate>
-        <div className="field">
-          <label className="field-label" htmlFor={inputId}>
-            Or enter your own amount
-          </label>
-          <span className="input-group">
-            <span className="input-prefix" aria-hidden="true">
-              {currencySymbol()}
-            </span>
-            <input
-              id={inputId}
-              className="input"
-              inputMode="decimal"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder={String(suggested / 10 ** minorDigits())}
-              aria-invalid={inputError ? true : undefined}
-              aria-describedby="bid-hint"
-            />
-            <button className="btn btn-secondary" type="submit" disabled={disabled}>
-              Bid
-            </button>
-          </span>
-        </div>
-        <p id="bid-hint" className="hint">
-          {view.highAmount === null
-            ? `Opening price ${formatMoney(view.startPrice)}`
-            : `Must be more than ${formatMoney(view.highAmount)}`}
-        </p>
-        {inputError && (
-          <p className="form-error" role="alert">
-            {inputError}
-          </p>
+      <div className="sval bid">
+        {paused && (
+          <div className="note note-warn">
+            <PauseIcon />
+            <p>Bidding is paused for a moment. It will resume shortly.</p>
+          </div>
         )}
-      </form>
+        {timeUp && !paused && (
+          <div className="note note-info">
+            <ClockIcon />
+            <p>Time is up. Waiting for the auction to close…</p>
+          </div>
+        )}
 
-      <div aria-live="polite" role="status">
-        {message && <p className={`bid-message bid-message-${message.tone}`}>{message.text}</p>}
-      </div>
-      {bidding.retryAmount !== null && !bidding.inFlight && (
-        <button className="btn btn-secondary btn-block" onClick={() => void bidding.retry()}>
-          Try again: {formatMoney(bidding.retryAmount)}
+        <button
+          className="btn btn-primary btn-lg btn-block"
+          disabled={disabled}
+          onClick={() => void bidding.submit(suggested)}
+        >
+          {bidding.inFlight ? 'Placing bid…' : `Bid ${formatMoney(suggested)}`}
         </button>
-      )}
+
+        <form onSubmit={handleCustom} noValidate>
+          <div className="fld">
+            <label className="lbl" htmlFor={inputId}>
+              Or enter your own amount
+            </label>
+            <span className="cur-btn">
+              <span className="cur">
+                <span className="cur-sym" aria-hidden="true">
+                  {currencySymbol()}
+                </span>
+                <input
+                  id={inputId}
+                  className="cur-input"
+                  inputMode="decimal"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  placeholder={String(suggested / 10 ** minorDigits())}
+                  aria-invalid={inputError ? true : undefined}
+                  aria-describedby="bid-hint"
+                />
+              </span>
+              <button className="btn btn-secondary" type="submit" disabled={disabled}>
+                Bid
+              </button>
+            </span>
+          </div>
+          <p id="bid-hint" className="hint num">
+            {view.highAmount === null
+              ? `Opening price ${formatMoney(view.startPrice)}`
+              : `Must be more than ${formatMoney(view.highAmount)}`}
+          </p>
+          {inputError && (
+            <p className="err" role="alert">
+              <ErrorIcon size={16} />
+              {inputError}
+            </p>
+          )}
+        </form>
+
+        <div className="bid-status" aria-live="polite" role="status">
+          {message && (
+            <div className={`note note-${message.tone}`}>
+              <NoticeIcon tone={message.tone} />
+              <p>{message.text}</p>
+            </div>
+          )}
+        </div>
+        {bidding.retryAmount !== null && !bidding.inFlight && (
+          <button className="btn btn-secondary btn-block" onClick={() => void bidding.retry()}>
+            Try again: {formatMoney(bidding.retryAmount)}
+          </button>
+        )}
+      </div>
     </section>
   )
 }

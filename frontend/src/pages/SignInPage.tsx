@@ -13,9 +13,9 @@ export function SignInPage() {
 
   return (
     <Page>
-      <section className="card narrow">
-        <h1>{signedIn ? 'Change your name' : 'Pick a display name'}</h1>
-        <p className="muted">
+      <section className="narrow">
+        <h1 className="title-h">{signedIn ? 'Change your name' : 'Pick a display name'}</h1>
+        <p className="lede">
           {signedIn
             ? `You're bidding as ${session.bidder?.display_name}. Other bidders see your new name on future bids.`
             : 'Your name appears next to your bids. No password or sign-up needed.'}
