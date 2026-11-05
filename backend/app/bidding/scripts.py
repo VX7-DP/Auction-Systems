@@ -176,14 +176,20 @@ return {'PAUSED', seq}
 # Runs once Postgres has committed a bid: records it as confirmed if it is the highest
 # committed under this load (a reload already counted it otherwise), then publishes
 # ``message`` on ``channel`` unless it is empty. Returns 1 if it recorded the bid.
+# While paused, high_* must equal confirmed_* (section 10): a bid committed before a
+# pause but confirmed after it becomes the high bid too.
 CONFIRM = LuaScript(
     """
 local recorded = 0
-local state = redis.call('HMGET', KEYS[1], 'epoch', 'confirmed_seq')
+local state = redis.call('HMGET', KEYS[1], 'epoch', 'confirmed_seq', 'status')
 if state[1] == ARGV[1] and (not state[2] or tonumber(ARGV[2]) > tonumber(state[2])) then
   redis.call('HSET', KEYS[1], 'confirmed_seq', ARGV[2], 'confirmed_amount', ARGV[3],
     'confirmed_bidder_id', ARGV[4], 'confirmed_bidder_name', ARGV[5],
     'confirmed_is_bot', ARGV[6])
+  if state[3] == 'paused' then
+    redis.call('HSET', KEYS[1], 'high_amount', ARGV[3], 'high_bidder_id', ARGV[4],
+      'high_bidder_name', ARGV[5], 'high_is_bot', ARGV[6])
+  end
   recorded = 1
 end
 if ARGV[8] ~= '' then
