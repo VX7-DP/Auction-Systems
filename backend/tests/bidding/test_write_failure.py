@@ -1,12 +1,16 @@
 """When Postgres won't take a bid Redis accepted: answer "error", pause the auction, and
 reopen it from Postgres once writes work again (CLAUDE.md section 4)."""
 
+import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 
 import httpx
+import pytest
+from redis.asyncio import Redis
 
+from app.bidding import scripts, store
 from app.contract import AuctionSnapshot, AuctionUpdate, BidResult
 from tests.bidding.helpers import (
     Bidder,
@@ -17,6 +21,7 @@ from tests.bidding.helpers import (
     assert_high_bid,
     bid,
     new_bidder,
+    poll_until,
     rejected,
 )
 
@@ -143,3 +148,65 @@ async def test_pause_event_keeps_the_last_saved_high_bid(
         120,
         ben.id,
     )
+
+
+async def test_a_bid_decided_as_the_auction_reopens_becomes_the_high_bid(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    stores: Stores,
+    listen: Listen,
+    hold_bid_insert: HoldBidInsert,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ben's bid is decided the moment the sweeper's reload reopens the auction, before
+    the reopen is announced. His saved bid must become the high bid in Postgres, and the
+    reopen event must not show it before it is saved."""
+    from app.bidding.sweeper import sweep_once
+
+    auction = await create_auction(start_price=100)
+    asha, ben = new_bidder("Asha"), new_bidder("Ben")
+    saved = await bid(auction.id, asha, 120)
+    assert saved == accepted(saved.bid_id, 1)
+    failed = await _bid_that_postgres_never_takes(
+        hold_bid_insert, auction.id, new_bidder("Kenji"), 150
+    )
+    assert failed.status == "error"
+
+    ben_bid_id = uuid.uuid4()
+    release = asyncio.Event()
+    real_save_bid = store.save_bid
+
+    async def save_bid_after_release(*args: object, **kwargs: object) -> None:
+        if args[3].bid_id == ben_bid_id:  # type: ignore[attr-defined]
+            await release.wait()
+        await real_save_bid(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(store, "save_bid", save_bid_after_release)
+
+    real_load = scripts.LOAD
+    ben_task: list[asyncio.Task[BidResult]] = []
+
+    async def load_then_decide_ben(redis: Redis, keys: list[str], args: list[str]) -> object:
+        result = await real_load(redis, keys, args)
+        if not ben_task:
+            ben_task.append(asyncio.create_task(bid(auction.id, ben, 200, bid_id=ben_bid_id)))
+
+            async def decided() -> bool:
+                return (await stores.hash(auction.id)).get("high_amount") == "200"
+
+            await poll_until(decided, task=ben_task[0], what="Redis to accept Ben's bid")
+        return result
+
+    monkeypatch.setattr(scripts, "LOAD", load_then_decide_ben)
+
+    async with listen(auction.id) as events:
+        await sweep_once()
+        release.set()
+        result = await ben_task[0]
+        published = await events.drain(wait=0.5)
+
+    assert result.status == "accepted" and result.seq is not None
+    row = await stores.auction(auction.id)
+    assert (row["high_amount"], row["high_bidder_name"]) == (200, "Ben")
+    await assert_high_bid(stores, auction.id, amount=200, bidder=ben, seq=result.seq)
+    reopened = [e for e in published if isinstance(e, AuctionUpdate) and e.seq < result.seq]
+    assert [(e.status, e.high_amount) for e in reopened] == [("open", 120)]
