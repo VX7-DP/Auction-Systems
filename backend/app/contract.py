@@ -41,7 +41,7 @@ Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, ma
 
 AuctionStatus = Literal["open", "paused", "closed"]
 BidStatus = Literal["accepted", "rejected", "error"]
-RejectReason = Literal["too_low", "closed", "paused", "not_found", "duplicate_bid_id"]
+RejectReason = Literal["too_low", "too_high", "closed", "paused", "not_found", "duplicate_bid_id"]
 
 
 # --- REST: session --------------------------------------------------------------

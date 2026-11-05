@@ -8,7 +8,7 @@ const MINUTE = 60_000
 test('lists auctions: running ones first, soonest to end on top, then ended ones', async () => {
   setupApp('/', {
     seed(backend) {
-      const later = backend.createAuction({ title: 'Armchair', startPrice: 100, endAt: Date.now() + 30 * MINUTE })
+      const later = backend.createAuction({ title: 'Armchair', startPrice: 100_000, endAt: Date.now() + 30 * MINUTE })
       backend.createAuction({ title: 'Camera', startPrice: 100, endAt: Date.now() + 5 * MINUTE })
       const ended = backend.createAuction({ title: 'Painting', startPrice: 100, endAt: Date.now() + 5 * MINUTE })
       backend.bid(later.id, { bidderId: 'b1', bidderName: 'Riya', amount: 150_000, isBot: true })

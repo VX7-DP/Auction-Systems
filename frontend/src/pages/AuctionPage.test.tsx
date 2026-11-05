@@ -106,6 +106,17 @@ describe('auction page', () => {
     expect(backend.requests.filter((r) => r.path.endsWith('/bids'))).toHaveLength(0)
   })
 
+  test('a custom amount above one raise is refused before it is sent', async () => {
+    const { backend } = openAuction({ signedInAs: 'Asha' })
+    await live()
+
+    // From an opening price of 1,000, one raise reaches at most 2,000.
+    fireEvent.change(screen.getByLabelText('Or enter your own amount'), { target: { value: '2000.01' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Bid' }))
+    expect(await screen.findByText(`Bid at most ${formatMoney(200_000)} in one go.`)).toBeTruthy()
+    expect(backend.requests.filter((r) => r.path.endsWith('/bids'))).toHaveLength(0)
+  })
+
   test('an auction that ended without bids does not invite a first bid', async () => {
     const { backend } = openAuction()
     await live()
@@ -123,12 +134,12 @@ describe('auction page', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^Bid / }))
     await screen.findByText("You're the highest bidder")
 
-    await serverBid(backend, RIYA, 500_000)
+    await serverBid(backend, RIYA, 200_000)
 
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain("You've been outbid.")
     expect(within(alert).getByText('Bot')).toBeTruthy()
-    expect(alert.textContent).toContain(formatMoney(500_000))
+    expect(alert.textContent).toContain(formatMoney(200_000))
     fireEvent.click(within(alert).getByRole('button', { name: 'Dismiss' }))
     expect(screen.queryByText("You've been outbid.")).toBeNull()
   })
@@ -165,12 +176,12 @@ describe('auction page', () => {
     const { backend } = openAuction({ signedInAs: 'Asha' })
     await live()
     backend.dropNextEvent(auctionId)
-    await serverBid(backend, BEN, 900_000) // we never hear about it
+    await serverBid(backend, BEN, 190_000) // we never hear about it
 
     fireEvent.click(screen.getByRole('button', { name: /^Bid / }))
 
     expect(await screen.findByText('Someone bid higher first. Try a higher amount.')).toBeTruthy()
-    await waitFor(() => expect(within(priceCard()).getByText(formatMoney(900_000))).toBeTruthy())
+    await waitFor(() => expect(within(priceCard()).getByText(formatMoney(190_000))).toBeTruthy())
   })
 
   test('a retry after a lost response reuses the bid_id, so the bid is placed once', async () => {
@@ -214,7 +225,7 @@ describe('auction page', () => {
   test('when the auction closes it shows the winner and removes the bid box', async () => {
     const { backend } = openAuction({ signedInAs: 'Asha' })
     await live()
-    await serverBid(backend, BEN, 300_000)
+    await serverBid(backend, BEN, 190_000)
     act(() => backend.closeNow(auctionId))
 
     expect(await screen.findByText(/Auction ended\. Won by/)).toBeTruthy()

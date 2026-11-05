@@ -14,7 +14,7 @@ import {
 } from '../api/contract.ts'
 import type { SocketLike, Transport, TransportRequest, TransportResponse } from '../api/transport.ts'
 import { newBidId } from '../lib/bidId.ts'
-import { nextBid } from '../lib/money.ts'
+import { maxBid, nextBid } from '../lib/money.ts'
 
 export interface MockBackendOptions {
   adminPassword?: string
@@ -186,6 +186,8 @@ export function createMockBackend(options: MockBackendOptions = {}) {
       result = { bid_id: bidId, status: 'rejected', reason: 'paused' }
     } else if (input.amount <= (a.highAmount ?? a.startPrice)) {
       result = { bid_id: bidId, status: 'rejected', reason: 'too_low' }
+    } else if (input.amount > maxBid(a.highAmount, a.startPrice)) {
+      result = { bid_id: bidId, status: 'rejected', reason: 'too_high' }
     } else {
       a.seq += 1
       a.highAmount = input.amount

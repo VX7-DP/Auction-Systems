@@ -124,6 +124,9 @@ describe('bids', () => {
     const reject = (amount: number): BidResult => backend.bid(auction.id, { ...bidder, amount })
     expect(reject(100000)).toMatchObject({ status: 'rejected', reason: 'too_low' })
     expect(backend.bid(auction.id, { ...bidder, amount: 120000 }).status).toBe('accepted')
+    // One raise from 1,200.00 reaches at most 2,400.00, like the server's too_high rule.
+    expect(reject(240001)).toMatchObject({ status: 'rejected', reason: 'too_high' })
+    expect(backend.bid(auction.id, { ...bidder, amount: 240000 }).status).toBe('accepted')
     expect(reject(120000)).toMatchObject({ status: 'rejected', reason: 'too_low' })
     expect(reject(110000)).toMatchObject({ status: 'rejected', reason: 'too_low' })
   })

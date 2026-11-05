@@ -56,7 +56,7 @@ export function usePlaceBid(auctionId: string, callbacks: Callbacks): PlaceBid {
           setMessage({ tone: 'success', text: `Your bid of ${formatMoney(amount)} is in.`, acceptedSeq: result.seq })
         } else if (result.status === 'rejected') {
           setMessage(rejectionMessage(result.reason))
-          if (result.reason === 'too_low' || result.reason === 'closed') onStale()
+          if (result.reason === 'too_low' || result.reason === 'too_high' || result.reason === 'closed') onStale()
         } else {
           setMessage({ tone: 'error', text: "Your bid couldn't be saved, so it wasn't placed. Please try again." })
         }
@@ -109,6 +109,8 @@ function rejectionMessage(reason: string | undefined): BidMessage {
   switch (reason) {
     case 'too_low':
       return { tone: 'info', text: 'Someone bid higher first. Try a higher amount.' }
+    case 'too_high':
+      return { tone: 'info', text: "That's more than one raise allows. Bid at most double the current price." }
     case 'closed':
       return { tone: 'info', text: 'This auction has ended.' }
     case 'paused':

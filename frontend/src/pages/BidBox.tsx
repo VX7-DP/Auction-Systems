@@ -3,7 +3,7 @@ import { ClockIcon, ErrorIcon, NoticeIcon, PauseIcon } from '../components/Icons
 import { SignInForm } from '../components/SignInForm.tsx'
 import type { AuctionView } from '../live/auctionFeed.ts'
 import type { PlaceBid } from '../live/usePlaceBid.ts'
-import { currencySymbol, formatMoney, minorDigits, nextBid, parseAmount } from '../lib/money.ts'
+import { currencySymbol, formatMoney, maxBid, minorDigits, nextBid, parseAmount } from '../lib/money.ts'
 import { useSession } from '../session/SessionContext.ts'
 
 export function BidBox({ view, bidding, now }: { view: AuctionView; bidding: PlaceBid; now: number }) {
@@ -13,6 +13,7 @@ export function BidBox({ view, bidding, now }: { view: AuctionView; bidding: Pla
   const inputId = useId()
   const me = session.bidder?.bidder_id ?? null
   const suggested = nextBid(view.highAmount, view.startPrice)
+  const highest = maxBid(view.highAmount, view.startPrice)
   const paused = view.status === 'paused'
   const timeUp = Date.parse(view.endAt) <= now
   const disabled = bidding.inFlight || paused
@@ -49,6 +50,10 @@ export function BidBox({ view, bidding, now }: { view: AuctionView; bidding: Pla
     }
     if (view.highAmount !== null && parsed.value <= view.highAmount) {
       setInputError(`Bid more than ${formatMoney(view.highAmount)}.`)
+      return
+    }
+    if (parsed.value > highest) {
+      setInputError(`Bid at most ${formatMoney(highest)} in one go.`)
       return
     }
     setInputError(null)
@@ -119,8 +124,8 @@ export function BidBox({ view, bidding, now }: { view: AuctionView; bidding: Pla
           </div>
           <p id="bid-hint" className="hint num">
             {view.highAmount === null
-              ? `Must be more than the opening price, ${formatMoney(view.startPrice)}`
-              : `Must be more than ${formatMoney(view.highAmount)}`}
+              ? `More than the opening price, ${formatMoney(view.startPrice)}, and at most ${formatMoney(highest)}`
+              : `More than ${formatMoney(view.highAmount)}, and at most ${formatMoney(highest)}`}
           </p>
           {inputError && (
             <p className="err" role="alert">

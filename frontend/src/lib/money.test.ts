@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { MAX_AMOUNT } from '../api/contract.ts'
-import { currencySymbol, formatMoney, minorDigits, nextBid, niceStep, parseAmount } from './money.ts'
+import { currencySymbol, formatMoney, maxBid, minorDigits, nextBid, niceStep, parseAmount } from './money.ts'
 
 describe('formatMoney', () => {
   test('drops decimals for whole amounts', () => {
@@ -65,6 +65,14 @@ describe('bid suggestions', () => {
     expect(niceStep(1500000, 2)).toBe(50000) // 15,000 -> step 500
     expect(niceStep(0, 2)).toBe(100) // never below one major unit
     expect(niceStep(3000, 2)).toBe(100)
+  })
+
+  test('maxBid allows the larger of doubling the price and a 1,000.00 raise', () => {
+    expect(maxBid(null, 0)).toBe(100_000)
+    expect(maxBid(null, 500_000)).toBe(1_000_000)
+    expect(maxBid(30_000, 500_000)).toBe(130_000) // the high bid, not the start price
+    expect(maxBid(123_456_789_012_345, 0)).toBe(246_913_578_024_690) // exact
+    expect(maxBid(MAX_AMOUNT - 1, 0)).toBe(MAX_AMOUNT) // never above the maximum
   })
 
   test('nextBid steps up from the high bid, or from the start price before any bid', () => {

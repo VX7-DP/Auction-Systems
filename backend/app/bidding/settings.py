@@ -29,6 +29,11 @@ class BiddingSettings(BaseSettings):
     # How long Redis remembers which auction accepted a bid_id, so a bid_id reused on
     # another auction is refused at once (section 10 of the design doc, bid:{bid_id}).
     bid_owner_ttl_s: int = Field(default=86400, gt=0)
+    # The most one bid may raise the price: the larger of this percentage of the
+    # current price (the opening price before any bid) and min_max_raise minor units.
+    # A bid above that is rejected as too_high (section 10 of the design doc).
+    max_raise_percent: int = Field(default=100, gt=0, le=10_000)
+    min_max_raise: int = Field(default=100_000, gt=0)
 
 
 _current: BiddingSettings | None = None

@@ -58,7 +58,10 @@ local now_ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
 
 # KEYS: auction hash, bid memory, bid owner.
 # ARGV: bid_id, bidder_id, bidder_name, amount, is_bot ("1" or "0"), auction_id,
-#       bid owner TTL in seconds.
+#       bid owner TTL in seconds, max raise percent, min max raise, MAX_AMOUNT.
+# A bid may raise the price by at most the larger of max raise percent of it and min
+# max raise; above that it is too_high. The percentage is split over price // 100 and
+# price % 100, so the cap is exact whenever it is below MAX_AMOUNT.
 # A bid_id another auction accepted is refused before it changes anything: Postgres
 # would refuse it anyway, and until then it would block every honest bid here.
 # Returns {"NOT_LOADED"}, {"REJECTED", reason}, {"REPEAT", epoch, remembered record},
@@ -97,8 +100,19 @@ local floor = state[4]
 if not floor then
   floor = state[3]
 end
-if tonumber(ARGV[4]) <= tonumber(floor) then
+local amount = tonumber(ARGV[4])
+floor = tonumber(floor)
+if amount <= floor then
   return {'REJECTED', 'too_low'}
+end
+local pct = tonumber(ARGV[8])
+local hundreds = math.floor(floor / 100)
+local raise = hundreds * pct + math.floor((floor - hundreds * 100) * pct / 100)
+if raise < tonumber(ARGV[9]) then
+  raise = tonumber(ARGV[9])
+end
+if amount > math.min(floor + raise, tonumber(ARGV[10])) then
+  return {'REJECTED', 'too_high'}
 end
 if tonumber(state[5]) + 2 > tonumber(state[6] or '0') then
   return {'RESERVE', epoch, state[5]}

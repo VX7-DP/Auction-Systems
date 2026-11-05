@@ -15,7 +15,13 @@ from app.bidding import scripts, store
 from app.bidding.events import publish_current_state
 from app.bidding.loader import reload_auction, reserve_seqs
 from app.bidding.settings import get_bidding_settings
-from app.contract import AuctionUpdate, BidResult, auction_events_channel, auction_key
+from app.contract import (
+    MAX_AMOUNT,
+    AuctionUpdate,
+    BidResult,
+    auction_events_channel,
+    auction_key,
+)
 from app.resources import get_resources
 
 logger = logging.getLogger(__name__)
@@ -51,6 +57,7 @@ async def _place_bid(
     is_bot: bool,
 ) -> BidResult:
     redis = get_resources().redis
+    settings = get_bidding_settings()
     keys = [
         auction_key(auction_id),
         scripts.bid_memory_key(auction_id),
@@ -63,7 +70,10 @@ async def _place_bid(
         str(amount),
         "1" if is_bot else "0",
         str(auction_id),
-        str(get_bidding_settings().bid_owner_ttl_s),
+        str(settings.bid_owner_ttl_s),
+        str(settings.max_raise_percent),
+        str(settings.min_max_raise),
+        str(MAX_AMOUNT),
     ]
 
     for _ in range(MAX_DECISIONS):
