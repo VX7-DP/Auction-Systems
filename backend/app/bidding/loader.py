@@ -11,9 +11,9 @@ import uuid
 from typing import Literal
 
 from app.bidding import scripts, store
-from app.bidding.events import publish_current_state
+from app.bidding.events import publish
 from app.bidding.settings import get_bidding_settings
-from app.contract import auction_key
+from app.contract import AuctionUpdate, auction_key
 from app.resources import get_resources
 
 logger = logging.getLogger(__name__)
@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 ReloadOutcome = Literal["loaded", "not_found", "busy"]
 
 
-async def load_into_redis(auction: store.StoredAuction) -> bool:
-    """Writes the auction's state into Redis. Returns True if this load reopened a
-    paused auction (one more seq, not yet recorded in Postgres)."""
+async def load_into_redis(auction: store.StoredAuction) -> int | None:
+    """Writes the auction's state into Redis. If this load reopened a paused auction,
+    returns the reopen's seq (one more seq, not yet recorded in Postgres); else None."""
     redis = get_resources().redis
     args = [
         str(auction.id),
@@ -46,7 +46,9 @@ async def load_into_redis(auction: store.StoredAuction) -> bool:
         [auction_key(auction.id), scripts.bid_memory_key(auction.id), scripts.PAUSED_AUCTIONS_KEY],
         args,
     )
-    return result[0] == "LOADED" and result[2] == "1"
+    if result[0] == "LOADED" and result[2] == "1":
+        return int(result[1])
+    return None
 
 
 async def reload_auction(auction_id: uuid.UUID) -> ReloadOutcome:
@@ -65,8 +67,9 @@ async def reload_auction(auction_id: uuid.UUID) -> ReloadOutcome:
         )
         if auction is None:
             return "not_found"
-        if await load_into_redis(auction):
-            await _announce_reopened(auction)
+        reopen_seq = await load_into_redis(auction)
+        if reopen_seq is not None:
+            await _announce_reopened(auction, reopen_seq)
         return "loaded"
     finally:
         await scripts.RELEASE_LOCK(resources.redis, [lock], [token])
@@ -85,12 +88,28 @@ async def reserve_seqs(auction_id: uuid.UUID, epoch: int, seq: int) -> None:
         )
 
 
-async def _announce_reopened(auction: store.StoredAuction) -> None:
-    """Records the unpause's seq in Postgres, then publishes it."""
+async def _announce_reopened(auction: store.StoredAuction, seq: int) -> None:
+    """Records the reopen's seq in Postgres, then publishes the state LOAD wrote.
+
+    Both come from the load itself, never from reading Redis again: the auction is open
+    from the moment LOAD returns, so a bid decided since would otherwise lend its seq to
+    record_seq (and its save would then not move the high bid) and be published unsaved.
+    """
     resources = get_resources()
-    seq = int(await resources.redis.hget(auction_key(auction.id), "seq") or 0)
     if await store.record_seq(resources.db_engine, auction.id, auction.load_epoch, seq):
-        await publish_current_state(resources.redis, auction.id)
+        await publish(
+            resources.redis,
+            AuctionUpdate(
+                auction_id=auction.id,
+                seq=seq,
+                high_amount=auction.high_amount,
+                high_bidder_id=auction.high_bidder_id,
+                high_bidder_name=auction.high_bidder_name,
+                is_bot=auction.high_is_bot,
+                end_at=store.from_ms(store.to_ms(auction.end_at)),
+                status="open",
+            ),
+        )
 
 
 async def _wait_for_release(lock: str, ttl_ms: int) -> None:
