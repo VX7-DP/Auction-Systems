@@ -156,6 +156,7 @@ Parallel sessions build against this. Change it here first, then in code. Amount
 - `POST /api/auctions/{id}/bids {bid_id, amount}` → `{bid_id, status: accepted | rejected | error, reason?, seq?}`, where `reason` is `too_low`, `too_high` (more than one raise allows: the current price, or the opening price before any bid, plus the larger of `BIDDING_MAX_RAISE_PERCENT`% of it, default 100, and `BIDDING_MIN_MAX_RAISE` minor units, default 100000), `closed`, `paused`, `not_found` or `duplicate_bid_id` (the `bid_id` was already used on another auction; make a new one).
 - `POST /api/admin/auctions {title, start_price, end_at}` with an `X-Admin-Password` header → the new auction.
 - `GET /api/health` → Postgres and Redis status.
+- `GET /api/metrics` → `{started_at, bids: {accepted, rejected: {<reason>: count}, error}, latency_ms: {samples, p50, p95, p99, max}}`. Public, no sign-in. Counts every `place_bid` call (people and bots) on this server instance since it started; `rejected` lists every reason above, 0 included. `latency_ms` is the duration of `place_bid` over the most recent 10,000 calls, nearest-rank percentiles, all `null` before the first call. Kept in process memory: a restart resets it, and each instance reports only its own.
 
 **WebSocket** at `/ws/auctions/{id}`, server to client only. Each message is JSON with a `type` field:
 
@@ -195,8 +196,8 @@ Defaults are in effect unless the owner changes them.
 - **Real-time library.** Default: plain FastAPI WebSockets, push only, since bids go over REST. That's little plumbing and keeps load testing simple. Alternative: python-socketio with its Redis manager, which adds rooms and reconnect but ties clients and load tests to the Socket.IO protocol.
 - **Other libraries:** redis-py's asyncio client; SQLAlchemy 2.0 async over asyncpg, with plain SQL for the bid write; Alembic for migrations.
 - **Sign-in:** guests pick a display name, kept in a signed cookie. The admin page sits behind one password from an environment variable.
-- **Observability:** not in Stages 1–2. The public metrics view uses app-level counters (bids accepted and rejected, bid latency percentiles). OpenTelemetry + Grafana come later.
-- **Load-test tool:** open until Stage 3. It must drive WebSocket viewers as well as HTTP bids.
+- **Observability:** not in Stages 1–2. The public metrics view uses app-level counters (bids accepted and rejected, bid latency percentiles), served by `GET /api/metrics` and kept in process memory per instance. OpenTelemetry + Grafana come later.
+- **Load-test tool:** k6 (decided 5 Nov), pinned as `grafana/k6:2.2.0`. It drives HTTP bidders and WebSocket viewers from one script, runs in Docker with nothing to install, and writes a JSON summary. The cost is a third language (JavaScript, `loadtest/` only). `loadtest/run.py` runs it against Compose, checks Postgres afterwards and writes `loadtest/results/`.
 - **Host:** open until Stage 2 (section 8).
 
 ## 12. Retired or superseded
@@ -240,7 +241,7 @@ Shared files belong to session 0: `backend/app/main.py`, `backend/app/config.py`
 | 3. Front end | `feat/frontend-ui` | `frontend/` | Auction list, auction page (countdown from the server's `end_at`, bid box, history, outbid notice, bot labels), sign-in, admin form, and reconnect plus resync on `seq` gaps. Mock the contract until the backend lands. | Every screen works against the mocked contract, and the build and tests pass. | Done: #5 |
 | 4. Deploy prep | `chore/vm-deploy` | `deploy/`, `docs/deploy.md` | For the one-VM option in section 8: production Compose override, Caddy serving the front end and proxying `/api` and `/ws` with HTTPS on `auction.summittech.in`, `.env.example`, a nightly Postgres backup, and a runbook for first deploy, redeploy and restore. | The production stack starts locally with Caddy's internal certificate, and a WebSocket upgrade works through it. | Done: #7 |
 | 5. Integration | `feat/stage1-integration` | Wiring across modules | Connect the merged pieces and add an end-to-end test of the Stage 1 done-signal, with two WebSocket clients standing in for browsers. | The Stage 1 done-signal passes in Compose. | Done: #10, with #11, #12 and #13 |
-| 6. Proof prep | `feat/load-test-metrics` | `loadtest/`, `backend/app/metrics/`, `README.md`, `docs/case-study.md` | Load test with HTTP bids and WebSocket viewers (the tool choice opens with tradeoffs), app-level metrics counters, and a README plus case-study skeleton in business terms. | The load test runs against Compose and writes a results file. | Next |
+| 6. Proof prep | `feat/load-test-metrics` | `loadtest/`, `backend/app/metrics/`, `README.md`, `docs/case-study.md` | Load test with HTTP bids and WebSocket viewers (the tool choice opens with tradeoffs), app-level metrics counters, and a README plus case-study skeleton in business terms. | The load test runs against Compose and writes a results file. | Done: #20 |
 
 ## Sources (checked 4 Nov 2026)
 

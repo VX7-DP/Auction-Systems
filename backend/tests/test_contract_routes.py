@@ -17,6 +17,7 @@ SECTION_10_HTTP_ROUTES = {
     ("POST", "/api/auctions/{auction_id}/bids"),
     ("POST", "/api/admin/auctions"),
     ("GET", "/api/health"),
+    ("GET", "/api/metrics"),
 }
 HTTP_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
 

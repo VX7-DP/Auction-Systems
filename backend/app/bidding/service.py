@@ -6,6 +6,7 @@ once committed), then the update is published.
 
 import asyncio
 import logging
+import time
 from typing import Literal
 from uuid import UUID
 
@@ -22,6 +23,7 @@ from app.contract import (
     auction_events_channel,
     auction_key,
 )
+from app.metrics import record_bid
 from app.resources import get_resources
 
 logger = logging.getLogger(__name__)
@@ -40,12 +42,17 @@ async def place_bid(
     amount: int,
     is_bot: bool = False,
 ) -> BidResult:
-    """Decide the bid in Redis (Lua CAS), commit it to Postgres, then publish it."""
+    """Decide the bid in Redis (Lua CAS), commit it to Postgres, then publish it.
+
+    Every call is counted and timed for GET /api/metrics, whatever its outcome."""
+    started = time.perf_counter()
     try:
-        return await _place_bid(auction_id, bid_id, bidder_id, bidder_name, amount, is_bot)
+        result = await _place_bid(auction_id, bid_id, bidder_id, bidder_name, amount, is_bot)
     except Exception:
         logger.exception("Bid %s on auction %s failed", bid_id, auction_id)
-        return BidResult(bid_id=bid_id, status="error")
+        result = BidResult(bid_id=bid_id, status="error")
+    record_bid(result, time.perf_counter() - started)
+    return result
 
 
 async def _place_bid(

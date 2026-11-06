@@ -1,0 +1,22 @@
+# Load-test override for docker-compose.yml. loadtest/run.py uses it:
+#   docker compose -f docker-compose.yml -f loadtest/compose.yml ...
+# Relative paths below resolve from the repo root (the first file's directory).
+
+services:
+  backend:
+    environment:
+      # Load-test traffic only: the simulated bidders would mix their bids into the numbers.
+      DEMO_BOTS_ENABLED: "false"
+
+  k6:
+    # Pinned. k6 2.x: k6/websockets is stable, and 2.0.0 fixed a hang at teardown when
+    # the server sends pings (uvicorn pings every 20 seconds).
+    image: grafana/k6:2.2.0
+    profiles: ["loadtest"]
+    volumes:
+      - ./loadtest:/scripts:ro
+    environment:
+      BASE_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
