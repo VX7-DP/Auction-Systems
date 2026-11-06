@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from app.realtime.hub import CLOSE_SERVICE_RESTART, Hub
 from app.realtime.listener import Listener
+from app.realtime.settings import RealtimeSettings
 from app.resources import get_resources
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ READY_WAIT_SECONDS = 3.0
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Runs this instance's one Pub/Sub listener. Per instance, not a locked job."""
-    hub = Hub()
+    hub = Hub(reorder_window_seconds=RealtimeSettings().reorder_window_ms / 1000)
     listener = Listener(
         get_resources().settings.redis_url,
         hub,
