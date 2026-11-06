@@ -31,9 +31,15 @@ The full write-up for clients is in [docs/case-study.md](docs/case-study.md).
 
 ## How it works
 
-- **A fast in-memory store decides.** Redis runs one atomic script per bid. The script checks that the auction is open, the deadline hasn't passed, the bid beats the current high and it isn't a duplicate, then gives the bid the next sequence number.
+- **A fast in-memory store decides.** Redis runs one atomic script per bid. The script checks that the auction is open, the deadline hasn't passed, the bid beats the current high without raising it by more than one step allows, and it isn't a duplicate, then gives the bid the next sequence number.
 - **The database confirms.** A bid counts only after PostgreSQL has saved it. Postgres is the source of truth, and Redis can always be rebuilt from it.
 - **Everyone sees it live.** Updates reach every viewer over WebSockets, fanned out through Redis Pub/Sub. Each update carries its sequence number, so a page that misses one fetches a fresh snapshot.
+
+## Bid rules
+
+- **Beat the current price.** A bid must be higher than the current high bid, or than the opening price before anyone has bid.
+- **One raise at a time.** A single bid can at most double the price, or add ₹1,000 if that is more. At ₹5,000, the most one bid can reach is ₹10,000. This stops one bidder from ending the contest with an absurd jump.
+- **Changing the limits.** They are `BIDDING_MAX_RAISE_PERCENT` (default 100) and `BIDDING_MIN_MAX_RAISE` (in paise or cents, default 100000). The front end mirrors them in `frontend/src/config.ts` so it can warn before sending, so change both together. The server's check is the one that counts.
 
 ## Run it locally
 
