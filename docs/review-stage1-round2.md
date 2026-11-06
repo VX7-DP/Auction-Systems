@@ -75,7 +75,7 @@ Each test failed before its fix.
 - **`bid_id` reuse as griefing.** Fixed after this review. Redis now remembers which auction accepted each `bid_id` (`bid:{bid_id}`, for a day), and DECIDE refuses one another auction owns before changing anything. After a Redis restart, old bids fall back to Postgres refusing them. Test: `test_idempotent_retry.py::test_a_bid_id_reused_on_another_auction_never_blocks_its_bids`.
 - **`_pause` re-reads the hash** after PAUSE (`service.py`). It could publish a later, unsaved bid only if Postgres recovered and a reload ran inside that sub-ms window.
 - **Write spikes on one auction.** Saves queue on the auction row lock. Past the 1 s statement timeout they fail twice and pause the auction. This is for the Stage 3 load test.
-- **`deploy/restore.sh`** brings back the dump's `seq_ceiling`. After a restore, seqs resume below ones that open tabs already saw, so those tabs ignore events until the seq catches up, or until they reload. Raising every `seq_ceiling` by a large constant after `pg_restore` would avoid it.
+- **`deploy/restore.sh`** brought back the dump's `seq_ceiling`, so after a restore seqs resumed below ones that open tabs had already seen. Fixed after this review: the script now moves every ceiling forward by `RESTORE_SEQ_JUMP` (default 1,000,000) after restoring.
 
 ## Fixes
 

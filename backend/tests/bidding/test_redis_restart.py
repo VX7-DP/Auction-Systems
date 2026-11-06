@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 
+import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -238,3 +239,45 @@ async def test_seq_shown_by_a_pause_is_not_reused_after_a_redis_restart(
         )
         assert all(event.seq > paused.seq for event in await events.drain())
     assert [row["bid_id"] for row in await stores.bids(auction.id)] == [next_bid.bid_id]
+
+
+async def test_after_a_restore_the_first_snapshot_shows_the_restored_state_at_a_new_seq(
+    create_auction: Callable[..., Awaitable[AuctionSnapshot]],
+    db_engine: AsyncEngine,
+    restart_redis: Callable[[], Awaitable[None]],
+    client: httpx.AsyncClient,
+) -> None:
+    """deploy/restore.sh puts back a dump, moves seq_ceiling forward and restarts Redis.
+    Every open page then reconnects and fetches a snapshot. A page ignores a snapshot
+    at or below the seq it shows, so if the snapshot still carries the dump's seq, the
+    page keeps showing bids the restore erased until someone bids again."""
+    auction = await create_auction(start_price=100)
+    asha, ben = new_bidder("Asha"), new_bidder("Ben")
+    first = await bid(auction.id, asha, 150)
+    second = await bid(auction.id, ben, 200)
+    assert (first.seq, second.seq) == (1, 2)
+    seen = (await client.get(f"/api/auctions/{auction.id}")).json()
+    assert (seen["seq"], seen["high_amount"]) == (2, 200)
+
+    # What the restore leaves behind: a dump taken after Asha's bid, with the jump.
+    async with db_engine.begin() as connection:
+        await connection.execute(
+            text("DELETE FROM bids WHERE bid_id = :bid_id"), {"bid_id": second.bid_id}
+        )
+        await connection.execute(
+            text(
+                "UPDATE auctions SET high_amount = 150, high_bidder_id = :asha,"
+                " high_bidder_name = 'Asha', high_seq = 1,"
+                " seq_ceiling = GREATEST(seq_ceiling, high_seq) + 1000000 WHERE id = :id"
+            ),
+            {"asha": asha.id, "id": auction.id},
+        )
+    await restart_redis()
+
+    snapshot = (await client.get(f"/api/auctions/{auction.id}")).json()
+    assert snapshot["high_amount"] == 150
+    assert snapshot["seq"] > seen["seq"], (
+        f"the snapshot after the restore is at seq {snapshot['seq']}; a page showing seq"
+        f" {seen['seq']} ignores it and keeps the erased bid"
+    )
+    assert [row["amount"] for row in snapshot["recent_bids"]] == [150]

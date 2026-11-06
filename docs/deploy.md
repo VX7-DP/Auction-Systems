@@ -130,9 +130,10 @@ deploy/restore.sh auction-20261105T031500Z.dump
 The script asks you to type `restore`, then does the following:
 1. Takes a safety dump of the current database, so the restore can be undone. `SKIP_SAFETY_DUMP=1` skips it, for when the current database can't be dumped.
 2. Stops the backend.
-3. Drops the database, recreates it, and restores the dump in one transaction.
-4. Restarts Redis. Redis is rebuilt from Postgres. Left as it was, Redis would hold sequence numbers and bids newer than the restored data. After the restart it starts empty, and each auction reloads from Postgres on its next bid.
-5. Starts the backend. Migrations run first, so an older dump is brought up to the current schema.
+3. Drops the database, recreates it, and restores the dump in one transaction, then runs the migrations, so an older dump is brought up to the current schema.
+4. Moves every auction's sequence numbers forward by `RESTORE_SEQ_JUMP` (default 1,000,000). The dump holds older numbers than the ones viewers last saw, and open pages ignore any number at or below the one they show. After the jump, each open page sees one gap and reloads the restored state. Raise it when restoring a dump much older than a day.
+5. Restarts Redis. Redis is rebuilt from Postgres. Left as it was, Redis would hold sequence numbers and bids newer than the restored data. After the restart it starts empty, and each auction reloads from Postgres on its next bid.
+6. Starts the backend.
 
 **Every bid confirmed after the dump was taken is lost.**
 
