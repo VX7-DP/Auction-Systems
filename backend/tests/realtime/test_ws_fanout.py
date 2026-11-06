@@ -55,20 +55,38 @@ async def test_a_client_gets_only_its_own_auctions_events(
             await ws.receive_json(timeout=0.3)
 
 
-async def test_strictly_older_seq_is_dropped_and_equal_seq_is_kept(
+async def test_a_reordered_publish_reaches_clients_in_seq_order(
     ws_connect: WsConnect, engine: FakeEngine
 ) -> None:
-    """Commits can finish out of order, so publishes can too. A late event must not make
-    the high bid go backwards; the client sees the gap and resyncs instead."""
+    """Commits can finish out of order, so publishes can too. The hub holds seq 3 until
+    seq 2 arrives, so the client sees no gap and has no reason to resync. An equal seq
+    is kept, since one state change can produce both an update and a close."""
     auction_id = await engine.create_auction()
     async with ws_connect(ws_url(auction_id)) as ws:
         for seq in (1, 3, 2, 3, 4):
             await engine.publish(update_event(auction_id, seq, amount=1_000 + seq))
 
-        received = [(await ws.receive_json(timeout=RECEIVE_TIMEOUT))["seq"] for _ in range(4)]
-        assert received == [1, 3, 3, 4]
+        received = [(await ws.receive_json(timeout=RECEIVE_TIMEOUT))["seq"] for _ in range(5)]
+        assert received == [1, 2, 3, 3, 4]
         with pytest.raises(TimeoutError):
             await ws.receive_json(timeout=0.3)
+
+
+async def test_an_event_later_than_the_reorder_window_is_dropped(
+    ws_connect: WsConnect, engine: FakeEngine, hub: Hub
+) -> None:
+    """Past the window the hub stops waiting: seq 3 goes out, and a seq 2 that turns up
+    afterwards must not make the high bid go backwards. The client resyncs on the gap."""
+    auction_id = await engine.create_auction()
+    async with ws_connect(ws_url(auction_id)) as ws:
+        await engine.publish(update_event(auction_id, 1))
+        await engine.publish(update_event(auction_id, 3))
+        assert (await ws.receive_json(timeout=RECEIVE_TIMEOUT))["seq"] == 1
+        assert (await ws.receive_json(timeout=RECEIVE_TIMEOUT))["seq"] == 3
+
+        await engine.publish(update_event(auction_id, 2))
+        await engine.publish(update_event(auction_id, 4))
+        assert (await ws.receive_json(timeout=RECEIVE_TIMEOUT))["seq"] == 4
 
 
 async def test_auction_closed_is_forwarded(ws_connect: WsConnect, engine: FakeEngine) -> None:
