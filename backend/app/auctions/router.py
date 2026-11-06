@@ -10,8 +10,14 @@ the sweeper reloads it, Redis can still hold a bid the close fenced off as its h
 bid, and before record_close commits the winner isn't known at all. So once Redis says
 closed, the snapshot answers from Postgres (the pre-close state until the close is
 recorded), and the list takes the amount from Postgres.
+
+When Redis has lost an auction that is still running (a Redis restart, or a restore
+from a dump), the snapshot first reloads it, as a bid would. The reload resumes seqs
+above anything Redis could have shown, so a page that reconnects takes the snapshot
+instead of ignoring it as older than what it already shows.
 """
 
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -20,12 +26,16 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auctions.live_state import read_live_states
-from app.contract import AuctionSnapshot, AuctionSummary, RecentBid
+from app.auctions.live_state import LiveState, read_live_states
+from app.bidding.loader import reload_auction
+from app.contract import AuctionSnapshot, AuctionSummary, RecentBid, auction_key
 from app.models import Auction, Bid
 from app.resources import get_db_session, get_redis
 
+logger = logging.getLogger(__name__)
+
 RECENT_BIDS_LIMIT = 20
+RELOAD_ATTEMPTS = 3
 
 router = APIRouter(prefix="/api/auctions", tags=["auctions"])
 
@@ -77,6 +87,10 @@ async def get_auction(auction_id: UUID, session: DbSession, redis: RedisClient) 
     auction = await session.get(Auction, auction_id)
     if auction is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such auction.")
+    if state is None and auction.status != "closed":
+        state = await _reload_live_state(redis, auction_id)
+        if state is not None and state.status == "closed":
+            state = None
 
     seq = state.seq if state else auction.high_seq
     bids = (
@@ -128,3 +142,18 @@ async def get_auction(auction_id: UUID, session: DbSession, redis: RedisClient) 
         high_is_bot=bids[0].is_bot if has_high and bids else None,
         recent_bids=recent_bids,
     )
+
+
+async def _reload_live_state(redis: Redis, auction_id: UUID) -> LiveState | None:
+    """Loads a running auction Redis has lost, then reads its live state. None, and the
+    snapshot answers from Postgres, if Redis is unreachable or the reload fails."""
+    try:
+        for _ in range(RELOAD_ATTEMPTS):
+            if await redis.exists(auction_key(auction_id)):
+                break
+            if await reload_auction(auction_id) == "not_found":
+                return None
+        return (await read_live_states(redis, [auction_id])).get(auction_id)
+    except Exception:
+        logger.warning("Could not reload auction %s for its snapshot", auction_id, exc_info=True)
+        return None
