@@ -41,7 +41,7 @@ The stack's ports and admin password follow the same environment variables as `d
 | --- | --- |
 | `client.bids` | Bids sent, accepted, rejected by reason, errors, and bids per second over the bidding time |
 | `client.bid_latency_ms` | Bid response time as k6 measured it (request sent to response received) |
-| `client.bid_to_own_update_ms` | From sending a bid to that bidder's own WebSocket showing it. This is the live-update delay. Updates dropped for arriving out of order (below) have no sample |
+| `client.bid_to_own_update_ms` | From sending a bid to that bidder's own WebSocket showing it. This is the live-update delay. Updates dropped for arriving after the reorder window (below) have no sample |
 | `client.websockets` | Connections, messages delivered, resyncs, events out of order, unexpected closes, and how many viewers ended on the final state |
 | `server` | `GET /api/metrics` after minus before: the server's own count. Its latency is the server's recent window (10,000 calls), so a short run on a busy server mixes in earlier bids |
 | `postgres` | What the source of truth saved for the auction |
@@ -58,9 +58,9 @@ Checks:
 - **Every viewer ends on the right high bid, with nothing out of order.** After the bidders stop, each viewer shows the final `seq` and high bid. No socket ever received an event older than one it already had.
 - **At least one bid was accepted.**
 
-### Resyncs are expected
+### Resyncs
 
-When two bids are saved at the same moment, the later `seq` can finish first. The server then drops the earlier event rather than send it out of order, and every page refetches the snapshot (CLAUDE.md section 4). The results count these as `resyncs`. Each one sends a snapshot request from every open page at once, so expect them to show up in the tail latency.
+When two bids are saved at the same moment, the later `seq` can publish first. The server holds it for up to 100 ms (`REALTIME_REORDER_WINDOW_MS`) while the earlier one arrives, then sends both in order, so pages see no gap. A resync means a seq didn't arrive in time: a genuine gap (a failed save, or the jump after Redis lost an auction) or a save slower than the window. Every open page then refetches the snapshot at once, so resyncs show up in the tail latency. Expect close to zero; the backend logs each one as "Gap not filled".
 
 ## Publishing numbers
 
